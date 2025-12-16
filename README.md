@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Swix Cortex (formerly SwixReport)
 
-## Getting Started
+**The AI-Native Data Intelligence Platform**
 
-First, run the development server:
+Swix Cortex is a next-generation analytics engine that transforms raw data into actionable insights using advanced Large Language Models (LLMs). It connects to your data sources (PostgreSQL, CSV, etc.), understands your schema automatically, and allows you to ask questions in plain English—visualizing the answers instantly.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+![Swix Cortex Dashboard](https://via.placeholder.com/1200x600?text=Swix+Cortex+Dashboard)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🚀 Key Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 🧠 AI Data Analyst
+- **Natural Language Querying**: Ask "What is the average salary by department?" and get SQL + Charts.
+- **Auto-Schema Discovery**: Connect any database or upload any CSV; Cortex automatically learns the structure.
+- **Smart Suggestions**: Don't know what to ask? Cortex suggests relevant analytical questions based on your data.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 📊 Dynamic Visualization
+- **Auto-Chart Selection**: The system intelligently picks the best visualization (Bar, Line, Pie, Area) for your data.
+- **Interactive Dashboards**: Toggle between rich charts and raw data tables instantly.
+- **Real-Time Analysis**: Queries run directly against your live database or ingested CSVs.
 
-## Learn More
+### 🔌 Universal Data Engine
+- **PostgreSQL**: First-class support for direct DB connections.
+- **CSV Ingestion**: Drag-and-drop CSV files to instantly create queryable SQL tables.
+- **Secure**: Enterprise-grade encryption for connection details.
 
-To learn more about Next.js, take a look at the following resources:
+## 🛠 Tech Stack
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Framework**: Next.js 15 (App Router)
+- **Language**: TypeScript
+- **Database**: PostgreSQL (via Prisma ORM)
+- **AI Engine**: OpenAI GPT-4o
+- **Visualization**: Recharts
+- **Styling**: Tailwind CSS + Shadcn UI
+- **Auth**: Custom JWT Authentication
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🏁 Getting Started
 
-## Deploy on Vercel
+### Prerequisites
+- Node.js 18+
+- PostgreSQL Database
+- OpenAI API Key
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Installation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/your-org/swix-cortex.git
+    cd swix-cortex
+    ```
+
+2.  **Install dependencies**
+    ```bash
+    npm install
+    ```
+
+3.  **Configure Environment**
+    Create a `.env` file:
+    ```env
+    DATABASE_URL="postgresql://user:pass@localhost:5432/swixreport"
+    OPENAI_API_KEY="sk-..."
+    JWT_SECRET="your-secret-key"
+    ```
+
+4.  **Initialize Database**
+    ```bash
+    npx prisma generate
+    npx prisma db push
+    npx prisma db seed  # Optional: Seeds test data
+    ```
+
+5.  **Run Development Server**
+    ```bash
+    npm run dev
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000) to see the app.
+
+## 🔮 Roadmap
+
+- [ ] **Multi-Source Joins**: Query across different databases in a single question.
+- [ ] **Scheduled Reports**: Email PDF reports automatically.
+- [ ] **Team Collaboration**: Share dashboards and insights with teammates.
+- [ ] **Advanced forecasting**: Use AI to predict future trends.
+
+---
+
+**Swix Cortex** — *Data at the speed of thought.*

@@ -1,0 +1,93 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum DataSourceType {
+  POSTGRES
+  MYSQL
+  MONGODB
+  SNOWFLAKE
+  CSV
+}
+
+enum DataSourceStatus {
+  ACTIVE
+  ERROR
+  SYNCING
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  password      String?   // Hashed password
+  image         String?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  dataSources   DataSource[]
+  queries       QueryHistory[]
+  reports       Report[]
+}
+
+model DataSource {
+  id                String           @id @default(uuid())
+  name              String
+  type              DataSourceType
+  connectionDetails String           // Encrypted JSON string
+  status            DataSourceStatus @default(ACTIVE)
+  lastSync          DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model QueryHistory {
+  id            String   @id @default(uuid())
+  prompt        String
+  generatedSQL  String?
+  executionTime Float?   // In milliseconds
+  createdAt     DateTime @default(now())
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id             String   @id @default(uuid())
+  title          String
+  description    String?
+  visualizations String   // JSON string storing chart configurations
+  isPublic       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SalesData {
+  id          Int      @id @default(autoincrement())
+  region      String
+  product     String
+  salesAmount Decimal  @map("sales_amount")
+  saleDate    DateTime @map("sale_date")
+  quantity    Int
+
+  @@map("sales_data")
+}
