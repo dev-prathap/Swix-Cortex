@@ -4,7 +4,7 @@
 
 Swix Cortex is a next-generation analytics engine that transforms raw data into actionable insights using advanced Large Language Models (LLMs). It connects to your data sources (PostgreSQL, CSV, etc.), understands your schema automatically, and allows you to ask questions in plain English—visualizing the answers instantly.
 
-![Swix Cortex Dashboard](https://via.placeholder.com/1200x600?text=Swix+Cortex+Dashboard)
+![Swix Cortex Dashboard](https://github.com/dev-prathap/Swix-Cortex/blob/main/public/image.png?raw=true?text=Swix+Cortex+Dashboard)
 
 ## 🚀 Key Features
 
