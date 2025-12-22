@@ -91,7 +91,7 @@ const sidebarGroups = [
         label: "Analytics",
         items: [
             { icon: Database, label: "Data Sources", href: "/dashboard/data-sources" },
-            { icon: Terminal, label: "Query Lab", href: "/dashboard/query" },
+            // { icon: Terminal, label: "Query Lab", href: "/dashboard/query" },
             { icon: PieChart, label: "Analysis", href: "/dashboard/analysis" },
             { icon: BarChart, label: "Reports", href: "/dashboard/reports" },
         ]

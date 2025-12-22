@@ -90,14 +90,74 @@ export async function POST(req: Request) {
 
             try {
                 if (tableName) {
+                    // Get column information
                     const res = await client.query(`
                         SELECT column_name, data_type 
                         FROM information_schema.columns 
                         WHERE table_name = $1
+                        ORDER BY ordinal_position
                     `, [tableName])
 
-                    const columns = res.rows.map((r: any) => `${r.column_name} (${r.data_type})`).join(', ')
-                    schemaContext = `Table '${tableName}' with columns: ${columns}`
+                    // Get sample data to understand actual content
+                    const sampleRes = await client.query(`
+                        SELECT * FROM "${tableName}" 
+                        WHERE "claim_amount" IS NOT NULL 
+                        AND "claim_amount" != '' 
+                        LIMIT 3
+                    `)
+
+                    // Analyze actual data types from samples
+                    const columnAnalysis = res.rows.map((col: any) => {
+                        const colName = col.column_name
+                        const dbType = col.data_type
+                        let actualType = dbType
+                        let sampleValues: any[] = []
+                        
+                        // Extract sample values for this column
+                        if (sampleRes.rows.length > 0) {
+                            sampleValues = sampleRes.rows.map(row => row[colName]).filter(val => val !== null && val !== '')
+                        }
+                        
+                        // Determine actual data type based on content
+                        if (sampleValues.length > 0 && dbType === 'text') {
+                            const firstVal = String(sampleValues[0]).trim()
+                            
+                            // Check if it's actually numeric (currency, amounts)
+                            if (/^\$?[\d,]+\.?\d*$/.test(firstVal) || !isNaN(Number(firstVal))) {
+                                actualType = 'NUMERIC (stored as text)'
+                            }
+                            // Check if it's actually a date
+                            else if (/^\d{4}-\d{2}-\d{2}$/.test(firstVal) || 
+                                     /^[A-Za-z]{3}\s\d{1,2},\s\d{4}$/.test(firstVal) ||
+                                     /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(firstVal)) {
+                                actualType = 'DATE (stored as text)'
+                            }
+                            // Check if it's categorical (limited unique values)
+                            else if (colName.includes('status') || colName.includes('name') || colName.includes('category')) {
+                                actualType = 'CATEGORICAL'
+                            }
+                        }
+                        
+                        return {
+                            name: colName,
+                            dbType: dbType,
+                            actualType: actualType,
+                            samples: sampleValues.slice(0, 2)
+                        }
+                    })
+
+                    // Build detailed schema context
+                    const columnDescriptions = columnAnalysis.map(col => {
+                        let desc = `"${col.name}" (${col.actualType})`
+                        if (col.samples.length > 0) {
+                            desc += ` - Examples: ${col.samples.join(', ')}`
+                        }
+                        return desc
+                    }).join('\n  ')
+                    
+                    schemaContext = `Table: "${tableName}"
+Columns:
+  ${columnDescriptions}`
                 } else {
                     // Limit to first 5 tables
                     const tablesRes = await client.query(`
@@ -122,57 +182,146 @@ export async function POST(req: Request) {
             } finally {
                 await client.end()
             }
+            
+            // Enhanced schema context with intelligent data type hints
+            const enhancedSchema = schemaContext + `
+
+DATA ANALYSIS CONTEXT:
+- This is healthcare claims rejection data
+- Key business metrics: claim amounts, collection rates, rejection patterns
+- Time dimensions: claim dates, service dates, processing dates
+- Categorical dimensions: payers, facilities, statuses, providers
+
+SQL GENERATION RULES:
+- For NUMERIC columns stored as text: Use CAST("column_name" AS NUMERIC)
+- For DATE columns stored as text: Use CAST("column_name" AS DATE) 
+- For currency values: Filter WHERE CAST("column_name" AS NUMERIC) > 0
+- For dates: Filter WHERE "column_name" IS NOT NULL AND "column_name" != ''
+- Always use double quotes around table and column names
+- Use meaningful aliases for calculated fields
+- Include appropriate ORDER BY and LIMIT clauses`
+            
+            // Generate comprehensive AI prompt with full schema understanding
+            const systemPrompt = `You are an expert PostgreSQL analyst specializing in healthcare claims data analysis.
+
+DATABASE SCHEMA:
+${enhancedSchema}
+
+Your task: Generate precise PostgreSQL queries based on user questions.
+
+CRITICAL REQUIREMENTS:
+1. ALWAYS return a valid SQL query - never "ERROR: Cannot answer"
+2. Use EXACT table name: "${tableName}"
+3. Wrap ALL identifiers in double quotes: "table_name", "column_name"
+4. Apply proper type casting based on actual data types shown in schema
+5. Include appropriate filters for data quality
+6. Use meaningful column aliases
+7. Add sensible LIMIT (default 50) unless user specifies otherwise
+
+TYPE CASTING RULES:
+- NUMERIC columns stored as text: CAST("column_name" AS NUMERIC)
+- DATE columns stored as text: CAST("column_name" AS DATE)
+- Always filter out nulls and empty strings for calculations
+
+QUERY PATTERNS BY QUESTION TYPE:
+
+Trend Analysis:
+- Time series: SELECT DATE_TRUNC('month', CAST("claim_date" AS DATE)) as month, COUNT(*) as claim_count FROM "${tableName}" WHERE "claim_date" IS NOT NULL GROUP BY 1 ORDER BY 1
+
+Top/Bottom Analysis:
+- Top payers: SELECT "payer_name", SUM(CAST("claim_amount" AS NUMERIC)) as total_amount FROM "${tableName}" WHERE "claim_amount" IS NOT NULL AND "payer_name" IS NOT NULL GROUP BY "payer_name" ORDER BY 2 DESC LIMIT 10
+
+Comparison Analysis:
+- Status distribution: SELECT "status", COUNT(*) as count, AVG(CAST("claim_amount" AS NUMERIC)) as avg_amount FROM "${tableName}" WHERE "status" IS NOT NULL GROUP BY "status" ORDER BY 2 DESC
+
+Detailed Analysis:
+- Complex filters: Use multiple WHERE conditions with proper type casting
+
+ALWAYS consider the business context of healthcare claims when generating queries.`
+            
+            const completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: prompt }
+                ],
+                model: "gpt-5.2-2025-12-11",
+            })
+
+            let generatedSQL = completion.choices[0].message.content?.trim()
+
+            if (generatedSQL) {
+                // Enhanced SQL cleaning and validation
+                generatedSQL = generatedSQL
+                    .replace(/```sql\n?/g, '') // Remove SQL code blocks
+                    .replace(/```/g, '') // Remove any remaining code blocks
+                    .replace(/^\s*--.*$/gm, '') // Remove SQL comments
+                    .replace(/\n\s*\n/g, '\n') // Remove empty lines
+                    .trim()
+                
+                // Validate that it starts with a SQL keyword
+                const sqlKeywords = ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']
+                const firstWord = generatedSQL.split(/\s+/)[0]?.toUpperCase()
+                
+                if (!firstWord || !sqlKeywords.includes(firstWord)) {
+                    console.error('Generated content is not valid SQL:', generatedSQL)
+                    generatedSQL = undefined // Force fallback
+                }
+                
+                // Check for common AI text patterns that shouldn't be in SQL
+                if (generatedSQL) {
+                    const sqlToTest: string = generatedSQL // Type assertion for clarity
+                    const invalidPatterns = [
+                        /^To\s+/i, // Starts with "To "
+                        /^Here\s+/i, // Starts with "Here "
+                        /^This\s+query/i, // Starts with "This query"
+                        /^The\s+following/i, // Starts with "The following"
+                        /^I\s+/i, // Starts with "I "
+                        /^You\s+/i // Starts with "You "
+                    ]
+                    
+                    if (invalidPatterns.some(pattern => pattern.test(sqlToTest))) {
+                        console.error('Generated content contains explanatory text:', sqlToTest)
+                        generatedSQL = undefined // Force fallback
+                    }
+                }
+            }
+
+            if (!generatedSQL || generatedSQL.startsWith("ERROR")) {
+                console.error('AI Generation Failed. Schema:', schemaContext)
+                console.error('Generated SQL:', generatedSQL)
+                
+                // Provide a fallback query for basic data exploration
+                const fallbackSQL = `SELECT * FROM "${tableName}" WHERE "claim_amount" IS NOT NULL LIMIT 10`
+                console.log('Using fallback query:', fallbackSQL)
+                
+                await prisma.queryHistory.create({
+                    data: {
+                        userId,
+                        prompt: prompt + ' [FALLBACK]',
+                        generatedSQL: fallbackSQL,
+                    }
+                })
+                
+                return NextResponse.json({ sql: fallbackSQL })
+            }
+
+            // Save query history
+            await prisma.queryHistory.create({
+                data: {
+                    userId,
+                    prompt,
+                    generatedSQL,
+                }
+            })
+
+            return NextResponse.json({ sql: generatedSQL })
+            
         } else {
             // Fallback for other types if implemented later
-            schemaContext = "Schema introspection not available for this source type."
+            return NextResponse.json({ error: 'Schema introspection not available for this source type' }, { status: 501 })
         }
 
-        const systemPrompt = `
-      You are an expert SQL data analyst. 
-      Your task is to convert the user's natural language question into a valid SQL query based on the provided schema.
-      
-      Schema:
-      ${schemaContext}
-      
-      Rules:
-      1. Return ONLY the SQL query. No markdown, no explanations.
-      2. Use standard PostgreSQL syntax.
-      3. ALWAYS wrap table names and column names in double quotes (e.g. "TableName", "ColumnName") to preserve case sensitivity.
-      4. The table name in the schema might be a generated ID (e.g. "ingest_..."). Use it EXACTLY as provided.
-      5. If the question cannot be answered with the schema, return "ERROR: Cannot answer".
-    `
-
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: prompt }
-            ],
-            model: "gpt-4o",
-        })
-
-        let generatedSQL = completion.choices[0].message.content?.trim()
-
-        if (generatedSQL) {
-            // Remove markdown code blocks if present
-            generatedSQL = generatedSQL.replace(/```sql\n?/g, '').replace(/```/g, '').trim()
-        }
-
-        if (!generatedSQL || generatedSQL.startsWith("ERROR")) {
-            console.error('AI Generation Failed. Schema:', schemaContext)
-            console.error('Generated SQL:', generatedSQL)
-            return NextResponse.json({ error: 'Could not generate query' }, { status: 400 })
-        }
-
-        // Save query history
-        await prisma.queryHistory.create({
-            data: {
-                userId,
-                prompt,
-                generatedSQL,
-            }
-        })
-
-        return NextResponse.json({ sql: generatedSQL })
+        // All AI generation logic is now handled inside the PostgreSQL block above
 
     } catch (error) {
         console.error('AI Query error:', error)

@@ -78,47 +78,85 @@ export default function AnalysisPage() {
     function inferChartConfig(columns: string[], rows: any[]) {
         if (rows.length === 0) return null
 
-        // 1. Identify Column Types
-        const sample = rows[0]
         console.log('[Debug] Inferring Chart Config. Columns:', columns)
-        console.log('[Debug] Sample Row:', sample)
+        console.log('[Debug] Sample Rows:', rows.slice(0, 3))
 
-        const numCols = columns.filter(col => {
-            const val = sample[col]
-            // Check if it's a real number OR a string that parses to a number (and isn't empty)
-            return typeof val === 'number' || (typeof val === 'string' && !isNaN(Number(val)) && val.trim() !== '')
+        // Analyze multiple rows for better type detection
+        const sampleSize = Math.min(rows.length, 5)
+        
+        const columnTypes = columns.map(col => {
+            let numCount = 0
+            let dateCount = 0
+            let textCount = 0
+            
+            for (let i = 0; i < sampleSize; i++) {
+                const val = rows[i][col]
+                
+                if (val === null || val === undefined || val === '') {
+                    continue
+                }
+                
+                // Check if numeric (including cleaned currency values)
+                if (typeof val === 'number' || 
+                    (typeof val === 'string' && !isNaN(Number(val)) && val.trim() !== '')) {
+                    numCount++
+                }
+                // Check if date (YYYY-MM-DD format or other date strings)
+                else if (typeof val === 'string' && 
+                         (/^\d{4}-\d{2}-\d{2}$/.test(val) || 
+                          (!isNaN(Date.parse(val)) && val.length > 4))) {
+                    dateCount++
+                }
+                // Otherwise it's text
+                else {
+                    textCount++
+                }
+            }
+            
+            // Determine dominant type
+            if (numCount >= dateCount && numCount >= textCount) {
+                return { column: col, type: 'number', confidence: numCount / sampleSize }
+            } else if (dateCount >= textCount) {
+                return { column: col, type: 'date', confidence: dateCount / sampleSize }
+            } else {
+                return { column: col, type: 'text', confidence: textCount / sampleSize }
+            }
         })
-        const strCols = columns.filter(col => {
-            const val = sample[col]
-            // It's a string column if it's a string AND NOT a number-string
-            return typeof val === 'string' && isNaN(Number(val))
-        })
-
+        
+        console.log('[Debug] Column Types:', columnTypes)
+        
+        const numCols = columnTypes.filter(ct => ct.type === 'number' && ct.confidence > 0.5).map(ct => ct.column)
+        const dateCols = columnTypes.filter(ct => ct.type === 'date' && ct.confidence > 0.5).map(ct => ct.column)
+        const textCols = columnTypes.filter(ct => ct.type === 'text' && ct.confidence > 0.5).map(ct => ct.column)
+        
         console.log('[Debug] Num Cols:', numCols)
-        console.log('[Debug] Str Cols:', strCols)
+        console.log('[Debug] Date Cols:', dateCols)
+        console.log('[Debug] Text Cols:', textCols)
 
-        const dateCols = columns.filter(col => {
-            const val = sample[col]
-            return typeof val === 'string' && !isNaN(Date.parse(val)) && val.length > 4
-        })
-
-        // 2. Heuristics
+        // Enhanced heuristics
         // Case A: Time Series (Date + Number) -> Line Chart
         if (dateCols.length > 0 && numCols.length > 0) {
-            return { type: 'line' as const, xKey: dateCols[0], dataKeys: numCols }
+            return { type: 'line' as const, xKey: dateCols[0], dataKeys: numCols.slice(0, 3) }
         }
 
-        // Case B: Categorical Comparison (String + Number) -> Bar Chart
-        if (strCols.length > 0 && numCols.length > 0) {
-            // If few categories, maybe Pie? But Bar is safer.
-            return { type: 'bar' as const, xKey: strCols[0], dataKeys: numCols }
+        // Case B: Categorical Comparison (Text + Number) -> Bar Chart
+        if (textCols.length > 0 && numCols.length > 0) {
+            return { type: 'bar' as const, xKey: textCols[0], dataKeys: numCols.slice(0, 3) }
         }
 
-        // Case C: Just Numbers -> Bar Chart (using Index as X?)
+        // Case C: Multiple Numbers -> Bar Chart with first column as X
         if (numCols.length >= 2) {
-            // Treat first number as X? No, usually bad.
-            // Let's just use the first column as X if it's unique-ish
-            return { type: 'bar' as const, xKey: columns[0], dataKeys: numCols.slice(1) }
+            return { type: 'bar' as const, xKey: columns[0], dataKeys: numCols.slice(1, 4) }
+        }
+        
+        // Case D: Single Number Column -> Simple bar with row index
+        if (numCols.length === 1) {
+            return { type: 'bar' as const, xKey: columns[0], dataKeys: numCols }
+        }
+        
+        // Case E: Fallback - use first two columns if available
+        if (columns.length >= 2) {
+            return { type: 'bar' as const, xKey: columns[0], dataKeys: [columns[1]] }
         }
 
         return null
@@ -293,29 +331,36 @@ export default function AnalysisPage() {
                                     </div>
                                 ) : (
                                     <div className="text-center p-8 text-slate-500">
-                                        Could not automatically visualize this data. Try the table view.
+                                        <div className="mb-4">
+                                            <BarChart2 className="h-12 w-12 mx-auto text-slate-300 mb-2" />
+                                            <p className="font-medium">Could not automatically analyze this data</p>
+                                            <p className="text-sm mt-1">Try the table view to see your results</p>
+                                        </div>
                                     </div>
                                 )}
                             </TabsContent>
 
                             <TabsContent value="table" className="mt-0">
-                                <div className="overflow-x-auto border rounded-lg">
+                            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700 overflow-hidden">
+                                <div className="max-h-96 overflow-auto">
                                     <Table>
-                                        <TableHeader>
+                                        <TableHeader className="sticky top-0 bg-slate-50 dark:bg-slate-900">
                                             <TableRow>
-                                                {result.columns.map((col, i) => (
-                                                    <TableHead key={i} className="bg-slate-50 dark:bg-slate-900 text-xs uppercase tracking-wider font-semibold">
-                                                        {col}
-                                                    </TableHead>
+                                                {result.columns.map(col => (
+                                                    <TableHead key={col} className="font-semibold">{col}</TableHead>
                                                 ))}
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {result.rows.map((row, i) => (
-                                                <TableRow key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                                                    {result.columns.map((col, j) => (
-                                                        <TableCell key={j} className="font-medium text-slate-700 dark:text-slate-300">
-                                                            {row[col]}
+                                            {result.rows.slice(0, 100).map((row, i) => (
+                                                <TableRow key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                                    {result.columns.map(col => (
+                                                        <TableCell key={col} className="font-mono text-sm">
+                                                            {row[col] === null || row[col] === undefined ? (
+                                                                <span className="text-slate-400 italic">null</span>
+                                                            ) : (
+                                                                String(row[col])
+                                                            )}
                                                         </TableCell>
                                                     ))}
                                                 </TableRow>
@@ -323,9 +368,15 @@ export default function AnalysisPage() {
                                         </TableBody>
                                     </Table>
                                 </div>
-                            </TabsContent>
-                        </Tabs>
-                    </CardContent>
+                                {result.rows.length > 100 && (
+                                    <div className="p-3 bg-slate-50 dark:bg-slate-900 border-t text-sm text-slate-500 text-center">
+                                        Showing first 100 of {result.rows.length} rows
+                                    </div>
+                                )}
+                            </div>
+                        </TabsContent>
+                    </Tabs>
+                </CardContent>
                 </Card>
             )}
         </div>
