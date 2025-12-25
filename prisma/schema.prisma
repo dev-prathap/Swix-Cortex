@@ -9,6 +9,10 @@ datasource db {
   provider = "postgresql"
 }
 
+// ---------------------------
+// Existing auth & app models
+// ---------------------------
+
 enum Role {
   USER
   ADMIN
@@ -38,9 +42,15 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Old relations
   dataSources   DataSource[]
   queries       QueryHistory[]
   reports       Report[]
+  
+  // New analyst platform relations
+  datasets      Dataset[]       @relation("UserDatasets")
+  nlQueries     Query[]         @relation("UserQueries")
+  memories      UserMemory[]    @relation("UserMemories")
 }
 
 model DataSource {
@@ -72,13 +82,19 @@ model Report {
   id             String   @id @default(uuid())
   title          String
   description    String?
-  visualizations String   // JSON string storing chart configurations
+  type           String   @default("executive") // executive, detailed, etc.
+  format         String   @default("pdf") // pdf, html, etc.
+  visualizations String?  // JSON string storing chart configurations
   isPublic       Boolean  @default(false)
+  generatedAt    DateTime @default(now())
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  datasetId      String
+  dataset        Dataset  @relation("DatasetReports", fields: [datasetId], references: [id], onDelete: Cascade)
 }
 
 model SalesData {
@@ -90,4 +106,173 @@ model SalesData {
   quantity    Int
 
   @@map("sales_data")
+}
+
+// ---------------------------
+// AI Data Analyst Platform models
+// ---------------------------
+
+enum DatasetStatus {
+  UPLOADED
+  PROFILING
+  PROFILED
+  CLEANING_SUGGESTED
+  CLEANED
+  ANALYZED
+  READY
+  ERROR
+}
+
+enum VersionType {
+  RAW
+  CLEANED
+  USER_MODIFIED
+}
+
+enum AnalysisType {
+  SUMMARY
+  TREND
+  COMPARISON
+  ANOMALY
+  FORECAST
+}
+
+enum RelationType {
+  ONE_TO_ONE
+  ONE_TO_MANY
+  MANY_TO_MANY
+}
+
+enum MemoryType {
+  CLEANING_PREFERENCE
+  COLUMN_RENAME
+  REJECTED_SUGGESTION
+  ACCEPTED_SUGGESTION
+  SEMANTIC_MAPPING
+  QUERY_PATTERN
+}
+
+model Dataset {
+  id               String           @id @default(uuid())
+  userId           String
+  name             String
+  originalFileName String
+  rawFileLocation  String
+  fileSize         BigInt
+  uploadedAt       DateTime         @default(now())
+  status           DatasetStatus    @default(UPLOADED)
+
+  user             User             @relation("UserDatasets", fields: [userId], references: [id])
+  versions         DatasetVersion[]
+  profile          DataProfile?
+  analyses         Analysis[]
+  cleaningPlans    CleaningPlan[]
+  semanticMappings SemanticMapping[]
+  relationships1   DatasetRelationship[] @relation("Dataset1")
+  relationships2   DatasetRelationship[] @relation("Dataset2")
+  queries          Query[]
+  reports          Report[]         @relation("DatasetReports")
+}
+
+model DatasetVersion {
+  id              String        @id @default(uuid())
+  datasetId       String
+  versionNumber   Int
+  versionType     VersionType
+  fileLocation    String
+  cleaningActions Json?
+  createdAt       DateTime      @default(now())
+
+  dataset         Dataset       @relation(fields: [datasetId], references: [id])
+}
+
+model DataProfile {
+  id               String    @id @default(uuid())
+  datasetId        String    @unique
+  domain           String
+  mainEntity       String
+  timeColumn       String?
+  metrics          Json
+  dimensions       Json
+  dataQualityScore Float
+  issues           Json
+  confidence       Float
+  profiledAt       DateTime  @default(now())
+
+  dataset          Dataset   @relation(fields: [datasetId], references: [id])
+}
+
+model CleaningPlan {
+  id                 String          @id @default(uuid())
+  datasetId          String
+  suggestedActions   Json
+  userApproved       Boolean         @default(false)
+  appliedAt          DateTime?
+  resultingVersionId String?
+  createdAt          DateTime        @default(now())
+
+  dataset            Dataset         @relation(fields: [datasetId], references: [id])
+}
+
+model SemanticMapping {
+  id            String   @id @default(uuid())
+  datasetId     String
+  concept       String
+  mappedColumns Json
+  confidence    Float
+  userConfirmed Boolean  @default(false)
+
+  dataset       Dataset  @relation(fields: [datasetId], references: [id])
+}
+
+model Analysis {
+  id             String       @id @default(uuid())
+  datasetId      String
+  type           AnalysisType
+  title          String
+  summary        String
+  insights       Json
+  visualizations Json
+  confidence     Float
+  generatedAt    DateTime     @default(now())
+
+  dataset        Dataset      @relation(fields: [datasetId], references: [id])
+}
+
+model Query {
+  id               String   @id @default(uuid())
+  datasetId        String
+  userId           String
+  naturalLanguage  String
+  interpretation   Json
+  resultAnalysisId String?
+  executedAt       DateTime @default(now())
+
+  dataset          Dataset  @relation(fields: [datasetId], references: [id])
+  user             User     @relation("UserQueries", fields: [userId], references: [id])
+}
+
+model UserMemory {
+  id         String     @id @default(uuid())
+  userId     String
+  memoryType MemoryType
+  context    Json
+  action     Json
+  learnedAt  DateTime   @default(now())
+
+  user       User       @relation("UserMemories", fields: [userId], references: [id])
+}
+
+model DatasetRelationship {
+  id              String       @id @default(uuid())
+  dataset1Id      String
+  dataset2Id      String
+  joinKey1        String
+  joinKey2        String
+  relationshipType RelationType
+  confidence      Float
+  userConfirmed   Boolean      @default(false)
+
+  dataset1        Dataset      @relation("Dataset1", fields: [dataset1Id], references: [id])
+  dataset2        Dataset      @relation("Dataset2", fields: [dataset2Id], references: [id])
 }

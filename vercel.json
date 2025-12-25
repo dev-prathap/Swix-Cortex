@@ -1,0 +1,14 @@
+{
+  "buildCommand": "prisma generate && next build",
+  "framework": "nextjs",
+  "installCommand": "bun install",
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "NEXT_PUBLIC_APP_URL": "@app-url"
+  }
+}
+

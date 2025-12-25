@@ -41,10 +41,10 @@ export async function POST(req: Request) {
 
     try {
         const body = await req.json()
-        const { title, description, visualizations, isPublic } = body
+        const { title, description, visualizations, isPublic, datasetId } = body
 
-        if (!title || !visualizations) {
-            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        if (!title || !visualizations || !datasetId) {
+            return NextResponse.json({ error: 'Missing required fields: title, visualizations, datasetId' }, { status: 400 })
         }
 
         const report = await prisma.report.create({
@@ -53,7 +53,8 @@ export async function POST(req: Request) {
                 description,
                 visualizations: JSON.stringify(visualizations),
                 isPublic: isPublic || false,
-                userId
+                userId,
+                datasetId
             }
         })
 

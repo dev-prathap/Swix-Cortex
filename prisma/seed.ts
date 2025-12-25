@@ -71,6 +71,20 @@ async function main() {
 
     console.log(`Created data sources: ${postgresSource.name}, ${csvSource.name}`)
 
+    // Create a test dataset
+    const dataset = await prisma.dataset.create({
+        data: {
+            userId: user.id,
+            name: 'Sample Sales Data',
+            originalFileName: 'sales_sample.csv',
+            rawFileLocation: 'uploads/sample/sales_sample.csv',
+            fileSize: BigInt(12345),
+            status: 'UPLOADED'
+        }
+    })
+
+    console.log(`Created dataset: ${dataset.name}`)
+
     // Create some reports
     await prisma.report.create({
         data: {
@@ -78,6 +92,7 @@ async function main() {
             description: 'Analysis of sales performance for the current month.',
             visualizations: JSON.stringify({ type: 'bar', data: [10, 20, 30] }),
             userId: user.id,
+            datasetId: dataset.id,
         },
     })
 
@@ -87,6 +102,7 @@ async function main() {
             description: 'Cohort analysis of user retention rates.',
             visualizations: JSON.stringify({ type: 'line', data: [100, 80, 60, 50] }),
             userId: user.id,
+            datasetId: dataset.id,
         },
     })
 

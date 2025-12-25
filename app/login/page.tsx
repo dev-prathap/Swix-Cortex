@@ -39,7 +39,8 @@ export default function LoginPage() {
         throw new Error(data.error || "Something went wrong")
       }
 
-      router.push("/dashboard")
+      // Redirect to analyst dashboard instead of /dashboard
+      router.push("/analyst")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
     } finally {

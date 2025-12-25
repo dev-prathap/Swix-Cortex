@@ -1,0 +1,30 @@
+# Vercel Ignore - Don't upload these to Vercel
+
+# Development
+.cursor/
+.vscode/
+.idea/
+
+# Tests
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+
+# Documentation
+*.md
+!README.md
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
