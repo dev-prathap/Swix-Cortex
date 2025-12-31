@@ -1,10 +1,7 @@
+import { getAIClient, getModelName } from "@/lib/ai/ai-client";
+import { safeParseJson } from "@/lib/utils/ai-helpers";
 import prisma from '@/lib/prisma'
-import OpenAI from 'openai'
 import { VisualizationAgent, VisualizationConfig } from './visualization-agent'
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || 'dummy-key-for-build'
-})
 
 export interface GeneratedReport {
     title: string
@@ -50,6 +47,13 @@ Return valid JSON matching the GeneratedReport structure.`
 
 export class ReportAgent {
     private vizAgent = new VisualizationAgent()
+    private client: any;
+    private model: string;
+
+    constructor() {
+        this.client = getAIClient('executive');
+        this.model = getModelName('executive');
+    }
 
     async generateReport(datasetId: string): Promise<GeneratedReport> {
         // Get dataset with all analyses
@@ -94,8 +98,8 @@ ${analyses.flatMap(a => (a.insights as any[]).map((i: any) => `• ${i.text} (${
 Generate a professional executive report with actionable recommendations.`
 
         // Call OpenAI
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+        const response = await this.client.chat.completions.create({
+            model: this.model,
             response_format: { type: 'json_object' },
             messages: [
                 { role: 'system', content: REPORT_SYSTEM_PROMPT },
@@ -104,7 +108,7 @@ Generate a professional executive report with actionable recommendations.`
             temperature: 0.5
         })
 
-        const result = JSON.parse(response.choices[0].message.content || '{}')
+        const result = safeParseJson(response.choices[0].message.content || '{}', {} as any);
 
         // Construct full report
         const report: GeneratedReport = {
@@ -143,7 +147,7 @@ Generate a professional executive report with actionable recommendations.`
     async exportReportAsMarkdown(report: GeneratedReport): Promise<string> {
         let md = `# ${report.title}\n\n`
         md += `## Executive Summary\n\n${report.executive_summary}\n\n`
-        
+
         md += `## Key Findings\n\n`
         report.key_findings.forEach((finding, idx) => {
             const icon = finding.severity === 'critical' ? '🔴' : finding.severity === 'warning' ? '⚠️' : 'ℹ️'

@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,71 +6,53 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------------------------
-// Existing auth & app models
-// ---------------------------
-
-enum Role {
-  USER
-  ADMIN
-}
-
-enum DataSourceType {
-  POSTGRES
-  MYSQL
-  MONGODB
-  SNOWFLAKE
-  CSV
-}
-
-enum DataSourceStatus {
-  ACTIVE
-  ERROR
-  SYNCING
-}
-
 model User {
-  id            String    @id @default(uuid())
-  name          String?
-  email         String    @unique
-  password      String?   // Hashed password
-  image         String?
-  role          Role      @default(USER)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  // Old relations
-  dataSources   DataSource[]
-  queries       QueryHistory[]
-  reports       Report[]
-  
-  // New analyst platform relations
-  datasets      Dataset[]       @relation("UserDatasets")
-  nlQueries     Query[]         @relation("UserQueries")
-  memories      UserMemory[]    @relation("UserMemories")
+  id                    String         @id @default(uuid())
+  name                  String?
+  email                 String         @unique
+  password              String?
+  image                 String?
+  profilePicture        String?
+  timezone              String         @default("Pacific Standard Time (PST)")
+  role                  Role           @default(USER)
+  inviteStatus          String         @default("active") // waitlist | invited | active
+  invitedBy             String?
+  invitedAt             DateTime?
+  betaStage             String         @default("public") // friends | beta | preview | public
+  hasCompletedOnboarding Boolean       @default(false)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  dataSources           DataSource[]
+  datasets              Dataset[]      @relation("UserDatasets")
+  nlQueries             Query[]        @relation("UserQueries")
+  queries               QueryHistory[]
+  reports               Report[]
+  memories              UserMemory[]   @relation("UserMemories")
+  feedback              Feedback[]
+  usageLogs             UsageLog[]
 }
 
 model DataSource {
   id                String           @id @default(uuid())
   name              String
   type              DataSourceType
-  connectionDetails String           // Encrypted JSON string
+  connectionDetails String
   status            DataSourceStatus @default(ACTIVE)
   lastSync          DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
-
   userId            String
   user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  realtimeEvents    RealtimeEvent[]
+  datasets          Dataset[]
 }
 
 model QueryHistory {
   id            String   @id @default(uuid())
   prompt        String
   generatedSQL  String?
-  executionTime Float?   // In milliseconds
+  executionTime Float?
   createdAt     DateTime @default(now())
-
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -82,19 +61,17 @@ model Report {
   id             String   @id @default(uuid())
   title          String
   description    String?
-  type           String   @default("executive") // executive, detailed, etc.
-  format         String   @default("pdf") // pdf, html, etc.
-  visualizations String?  // JSON string storing chart configurations
+  visualizations String?
   isPublic       Boolean  @default(false)
-  generatedAt    DateTime @default(now())
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   datasetId      String
+  format         String   @default("pdf")
+  generatedAt    DateTime @default(now())
+  type           String   @default("executive")
   dataset        Dataset  @relation("DatasetReports", fields: [datasetId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model SalesData {
@@ -108,9 +85,250 @@ model SalesData {
   @@map("sales_data")
 }
 
-// ---------------------------
-// AI Data Analyst Platform models
-// ---------------------------
+model Dataset {
+  id                      String                @id @default(uuid())
+  userId                  String
+  name                    String
+  originalFileName        String
+  rawFileLocation         String
+  fileSize                BigInt
+  uploadedAt              DateTime              @default(now())
+  status                  DatasetStatus         @default(UPLOADED)
+  syncProgress            Int                   @default(0)
+  isDemo                  Boolean               @default(false)
+  insightFeed             Json?
+  customerSegmentSummary  Json?                 // Summary of customer segments (Champions, At-Risk, etc.)
+  forecastSummary         Json?                 // Latest revenue forecast summary
+  lastProfiledAt          DateTime?             // Last time customer profiling ran
+  lastForecastAt          DateTime?             // Last time revenue forecast ran
+  lastAnomalyCheckAt      DateTime?             // Last time anomaly detection ran
+  analyses                Analysis[]
+  cleaningPlans           CleaningPlan[]
+  profile                 DataProfile?
+  dataSourceId            String?
+  dataSource              DataSource?           @relation(fields: [dataSourceId], references: [id])
+  user                    User                  @relation("UserDatasets", fields: [userId], references: [id])
+  relationships1          DatasetRelationship[] @relation("Dataset1")
+  relationships2          DatasetRelationship[] @relation("Dataset2")
+  versions                DatasetVersion[]
+  documentChunks          DocumentChunk[]
+  metrics                 MetricDefinition[]
+  queries                 Query[]
+  reports                 Report[]              @relation("DatasetReports")
+  semanticMappings        SemanticMapping[]
+  customerProfiles        CustomerProfile[]
+  dailyBriefings          DailyBriefing[]
+  productInsights         ProductInsight[]
+}
+
+model DatasetVersion {
+  id              String      @id @default(uuid())
+  datasetId       String
+  versionNumber   Int
+  versionType     VersionType
+  fileLocation    String
+  cleaningActions Json?
+  createdAt       DateTime    @default(now())
+  dataset         Dataset     @relation(fields: [datasetId], references: [id])
+}
+
+model DataProfile {
+  id               String   @id @default(uuid())
+  datasetId        String   @unique
+  domain           String
+  mainEntity       String
+  timeColumn       String?
+  metrics          Json
+  dimensions       Json
+  dataQualityScore Float
+  issues           Json
+  confidence       Float
+  profiledAt       DateTime @default(now())
+  dataset          Dataset  @relation(fields: [datasetId], references: [id])
+}
+
+model CleaningPlan {
+  id                 String    @id @default(uuid())
+  datasetId          String
+  suggestedActions   Json
+  userApproved       Boolean   @default(false)
+  appliedAt          DateTime?
+  resultingVersionId String?
+  createdAt          DateTime  @default(now())
+  dataset            Dataset   @relation(fields: [datasetId], references: [id])
+}
+
+model SemanticMapping {
+  id            String  @id @default(uuid())
+  datasetId     String
+  concept       String
+  mappedColumns Json
+  confidence    Float
+  userConfirmed Boolean @default(false)
+  dataset       Dataset @relation(fields: [datasetId], references: [id])
+}
+
+model Analysis {
+  id             String       @id @default(uuid())
+  datasetId      String
+  type           AnalysisType
+  title          String
+  summary        String
+  insights       Json
+  visualizations Json
+  confidence     Float
+  generatedAt    DateTime     @default(now())
+  dataset        Dataset      @relation(fields: [datasetId], references: [id])
+}
+
+model Query {
+  id               String   @id @default(uuid())
+  datasetId        String
+  userId           String
+  naturalLanguage  String
+  interpretation   Json
+  resultAnalysisId String?
+  executedAt       DateTime @default(now())
+  dataset          Dataset  @relation(fields: [datasetId], references: [id])
+  user             User     @relation("UserQueries", fields: [userId], references: [id])
+}
+
+model UserMemory {
+  id         String     @id @default(uuid())
+  userId     String
+  memoryType MemoryType
+  context    Json
+  action     Json
+  learnedAt  DateTime   @default(now())
+  user       User       @relation("UserMemories", fields: [userId], references: [id])
+}
+
+model DatasetRelationship {
+  id               String       @id @default(uuid())
+  dataset1Id       String
+  dataset2Id       String
+  joinKey1         String
+  joinKey2         String
+  relationshipType RelationType
+  confidence       Float
+  userConfirmed    Boolean      @default(false)
+  dataset1         Dataset      @relation("Dataset1", fields: [dataset1Id], references: [id])
+  dataset2         Dataset      @relation("Dataset2", fields: [dataset2Id], references: [id])
+}
+
+model DocumentChunk {
+  id        String   @id @default(uuid())
+  datasetId String
+  content   String
+  metadata  Json?
+  // embedding Unsupported("vector")?  // Disabled for MVP - pooler doesn't support pgvector
+  createdAt DateTime @default(now())
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([datasetId])
+}
+
+model MetricDefinition {
+  id          String   @id @default(uuid())
+  datasetId   String
+  name        String
+  formula     String
+  description String?
+  format      String   @default("number")
+  category    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  dataset     Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([datasetId, name])
+}
+
+model RealtimeEvent {
+  id           String     @id @default(uuid())
+  dataSourceId String
+  eventType    String
+  payload      Json
+  processed    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@index([dataSourceId])
+}
+
+model CustomerProfile {
+  id                  String   @id @default(uuid())
+  datasetId           String
+  customerId          String
+  customerName        String
+  rfmScore            Json     // { recency_score, frequency_score, monetary_score, total_score }
+  segment             String   // Champions, Loyalists, At-Risk, Lost, etc.
+  churnRisk           Json     // { probability, risk_level, days_since_last_order, expected_next_purchase_days }
+  lifetimeValue       Json     // { total_spent, average_order_value, total_orders, projected_ltv_12m }
+  behavioralInsights  Json?    // { preferred_categories, purchase_frequency_pattern, price_sensitivity }
+  recommendations     String[] // Actionable suggestions
+  lastProfiledAt      DateTime @default(now())
+  createdAt           DateTime @default(now())
+  dataset             Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([datasetId, customerId])
+  @@index([datasetId])
+  @@index([segment])
+}
+
+model DailyBriefing {
+  id               String   @id @default(uuid())
+  datasetId        String
+  briefingDate     DateTime
+  executiveSummary String   @db.Text
+  keyMetrics       Json     // { total_revenue, total_orders, revenue_change_pct, etc. }
+  anomalies        String?  @db.Text
+  rawData          Json?    // Supporting data for the briefing
+  generatedAt      DateTime @default(now())
+  dataset          Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([datasetId])
+  @@index([briefingDate])
+}
+
+model ProductInsight {
+  id                     String   @id @default(uuid())
+  datasetId              String
+  productSku             String
+  productName            String
+  currentStock           Int
+  predictedStockoutDays  Int?
+  riskLevel              String   // low, medium, high, critical
+  recommendation         String
+  lastCheckedAt          DateTime @default(now())
+  createdAt              DateTime @default(now())
+  dataset                Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([datasetId, productSku])
+  @@index([datasetId])
+  @@index([riskLevel])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum DataSourceType {
+  POSTGRES
+  MYSQL
+  MONGODB
+  SNOWFLAKE
+  CSV
+  SHOPIFY
+  STRIPE
+  WOOCOMMERCE
+}
+
+enum DataSourceStatus {
+  ACTIVE
+  ERROR
+  SYNCING
+}
 
 enum DatasetStatus {
   UPLOADED
@@ -152,127 +370,52 @@ enum MemoryType {
   QUERY_PATTERN
 }
 
-model Dataset {
-  id               String           @id @default(uuid())
-  userId           String
-  name             String
-  originalFileName String
-  rawFileLocation  String
-  fileSize         BigInt
-  uploadedAt       DateTime         @default(now())
-  status           DatasetStatus    @default(UPLOADED)
-
-  user             User             @relation("UserDatasets", fields: [userId], references: [id])
-  versions         DatasetVersion[]
-  profile          DataProfile?
-  analyses         Analysis[]
-  cleaningPlans    CleaningPlan[]
-  semanticMappings SemanticMapping[]
-  relationships1   DatasetRelationship[] @relation("Dataset1")
-  relationships2   DatasetRelationship[] @relation("Dataset2")
-  queries          Query[]
-  reports          Report[]         @relation("DatasetReports")
+model Waitlist {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String?
+  company     String?
+  useCase     String?
+  source      String   @default("landing") // landing | dashboard | referral
+  referredBy  String?
+  status      String   @default("pending") // pending | invited | converted
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now())
+  invitedAt   DateTime?
 }
 
-model DatasetVersion {
-  id              String        @id @default(uuid())
-  datasetId       String
-  versionNumber   Int
-  versionType     VersionType
-  fileLocation    String
-  cleaningActions Json?
-  createdAt       DateTime      @default(now())
-
-  dataset         Dataset       @relation(fields: [datasetId], references: [id])
+model Feedback {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // feature | bug | general | nps
+  content   String
+  rating    Int?     // For NPS: 0-10
+  priority  Int      @default(0)
+  status    String   @default("open") // open | reviewing | planned | completed | closed
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model DataProfile {
-  id               String    @id @default(uuid())
-  datasetId        String    @unique
-  domain           String
-  mainEntity       String
-  timeColumn       String?
-  metrics          Json
-  dimensions       Json
-  dataQualityScore Float
-  issues           Json
-  confidence       Float
-  profiledAt       DateTime  @default(now())
-
-  dataset          Dataset   @relation(fields: [datasetId], references: [id])
+model UsageLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String   // query | sync | export | analysis
+  feature   String   // analyst | profiler | inventory | forecasting
+  metadata  Json?
+  duration  Int?     // milliseconds
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model CleaningPlan {
-  id                 String          @id @default(uuid())
-  datasetId          String
-  suggestedActions   Json
-  userApproved       Boolean         @default(false)
-  appliedAt          DateTime?
-  resultingVersionId String?
-  createdAt          DateTime        @default(now())
-
-  dataset            Dataset         @relation(fields: [datasetId], references: [id])
-}
-
-model SemanticMapping {
-  id            String   @id @default(uuid())
-  datasetId     String
-  concept       String
-  mappedColumns Json
-  confidence    Float
-  userConfirmed Boolean  @default(false)
-
-  dataset       Dataset  @relation(fields: [datasetId], references: [id])
-}
-
-model Analysis {
-  id             String       @id @default(uuid())
-  datasetId      String
-  type           AnalysisType
-  title          String
-  summary        String
-  insights       Json
-  visualizations Json
-  confidence     Float
-  generatedAt    DateTime     @default(now())
-
-  dataset        Dataset      @relation(fields: [datasetId], references: [id])
-}
-
-model Query {
-  id               String   @id @default(uuid())
-  datasetId        String
-  userId           String
-  naturalLanguage  String
-  interpretation   Json
-  resultAnalysisId String?
-  executedAt       DateTime @default(now())
-
-  dataset          Dataset  @relation(fields: [datasetId], references: [id])
-  user             User     @relation("UserQueries", fields: [userId], references: [id])
-}
-
-model UserMemory {
-  id         String     @id @default(uuid())
-  userId     String
-  memoryType MemoryType
-  context    Json
-  action     Json
-  learnedAt  DateTime   @default(now())
-
-  user       User       @relation("UserMemories", fields: [userId], references: [id])
-}
-
-model DatasetRelationship {
-  id              String       @id @default(uuid())
-  dataset1Id      String
-  dataset2Id      String
-  joinKey1        String
-  joinKey2        String
-  relationshipType RelationType
-  confidence      Float
-  userConfirmed   Boolean      @default(false)
-
-  dataset1        Dataset      @relation("Dataset1", fields: [dataset1Id], references: [id])
-  dataset2        Dataset      @relation("Dataset2", fields: [dataset2Id], references: [id])
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  enabled     Boolean  @default(false)
+  description String?
+  userStages  String[] // ["friends", "beta", "preview", "public"]
+  rollout     Int      @default(100) // percentage 0-100
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

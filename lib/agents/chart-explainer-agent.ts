@@ -1,8 +1,4 @@
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-})
+import { getAIClient, getModelName } from "@/lib/ai/ai-client";
 
 const EXPLAINER_SYSTEM_PROMPT = `You are a professional data analyst explaining chart insights to business users.
 
@@ -27,6 +23,13 @@ export interface ChartExplanation {
 }
 
 export class ChartExplainerAgent {
+    private client: any;
+    private model: string;
+
+    constructor() {
+        this.client = getAIClient('fast');
+        this.model = getModelName('fast');
+    }
     /**
      * Generate human-friendly explanation for a chart
      */
@@ -38,7 +41,7 @@ export class ChartExplainerAgent {
     ): Promise<ChartExplanation> {
         // Prepare data summary for AI
         const dataSummary = this.prepareDataSummary(data, interpretation)
-        
+
         const prompt = `User asked: "${userQuery}"
 
 Chart Type: ${chartType}
@@ -54,8 +57,8 @@ ${JSON.stringify(data.slice(0, 10), null, 2)}
 Provide a clear, actionable explanation of what this chart reveals.`
 
         try {
-            const response = await openai.chat.completions.create({
-                model: 'gpt-4o',
+            const response = await this.client.chat.completions.create({
+                model: this.model,
                 messages: [
                     { role: 'system', content: EXPLAINER_SYSTEM_PROMPT },
                     { role: 'user', content: prompt }
@@ -65,7 +68,7 @@ Provide a clear, actionable explanation of what this chart reveals.`
             })
 
             const explanation = response.choices[0].message.content || ''
-            
+
             return this.parseExplanation(explanation, data, interpretation)
         } catch (error) {
             console.error('[ChartExplainer] Error:', error)
@@ -122,7 +125,7 @@ Provide a clear, actionable explanation of what this chart reveals.`
      */
     private parseExplanation(text: string, data: any[], interpretation: any): ChartExplanation {
         const lines = text.split('\n').filter(l => l.trim())
-        
+
         // Extract key insights (lines with numbers or patterns)
         const keyInsights = lines
             .filter(l => /\d+|%|increase|decrease|highest|lowest|trend/i.test(l))
@@ -161,7 +164,7 @@ Provide a clear, actionable explanation of what this chart reveals.`
     ): ChartExplanation {
         const metrics = interpretation.metrics || []
         const metricName = metrics[0] || 'value'
-        
+
         const values = data.map(row => {
             const val = row[metricName] || row.value || 0
             return typeof val === 'number' ? val : Number(val) || 0

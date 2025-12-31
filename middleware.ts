@@ -10,12 +10,19 @@ export async function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value
     const { pathname } = request.nextUrl
 
-    // Public paths that don't require auth
-    const publicPaths = ['/login', '/signup', '/', '/api/auth/login', '/api/auth/register']
+    // BETA MODE: Block public signup - invite-only access
+    if (pathname === '/signup' || pathname === '/api/auth/register') {
+        // Redirect signup attempts to waitlist
+        return NextResponse.redirect(new URL('/waitlist', request.url))
+    }
 
-    if (publicPaths.some(path => pathname.startsWith(path))) {
-        // If user is already logged in and tries to access login/signup, redirect to dashboard
-        if (token && (pathname === '/login' || pathname === '/signup')) {
+    // Public paths that don't require auth
+    const publicPaths = ['/login', '/api/auth/login', '/api/cron', '/waitlist', '/api/waitlist', '/onboarding', '/api/auth/complete-onboarding']
+    const isPublicPath = publicPaths.some(path => pathname === path || pathname.startsWith(path + '/')) || pathname === '/'
+
+    if (isPublicPath) {
+        // If user is already logged in and tries to access login, redirect to dashboard
+        if (token && pathname === '/login') {
             try {
                 await jwtVerify(token, JWT_SECRET)
                 return NextResponse.redirect(new URL('/dashboard', request.url))

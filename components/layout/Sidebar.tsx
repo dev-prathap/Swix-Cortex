@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useDashboard } from "@/components/providers/dashboard-provider"
 import {
     Home,
@@ -19,7 +20,10 @@ import {
     ChevronLeft,
     ChevronRight,
     LogOut,
-    Layers
+    Layers,
+    Brain,
+    Calculator,
+    Plug
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -65,17 +69,14 @@ function SidebarItem({ icon: Icon, label, href, isCollapsed }: SidebarItemProps)
         <Link
             href={href}
             className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:text-foreground",
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all",
                 isActive
-                    ? "bg-gradient-to-r from-primary/10 to-primary/5 text-primary font-medium border-l-2 border-primary"
-                    : "text-muted-foreground hover:bg-muted"
+                    ? "bg-white/10 text-white font-medium"
+                    : "text-slate-400 hover:bg-white/5 hover:text-white"
             )}
         >
             <Icon className="h-4 w-4" />
-            <span>{label}</span>
-            {isActive && (
-                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(37,99,235,0.6)]"></div>
-            )}
+            <span className="text-sm">{label}</span>
         </Link>
     )
 }
@@ -91,6 +92,8 @@ const sidebarGroups = [
         label: "Analytics",
         items: [
             { icon: Database, label: "Data Sources", href: "/dashboard/data-sources" },
+            { icon: Brain, label: "Business Brain", href: "/dashboard/business-brain" },
+            { icon: Calculator, label: "Metric Store", href: "/dashboard/metrics" },
             // { icon: Terminal, label: "Query Lab", href: "/dashboard/query" },
             { icon: PieChart, label: "Analysis", href: "/dashboard/analysis" },
             { icon: BarChart, label: "Reports", href: "/dashboard/reports" },
@@ -133,7 +136,8 @@ export function Sidebar() {
         }
     }
 
-    const getInitials = (name: string) => {
+    const getInitials = (name: string | undefined) => {
+        if (!name) return "U"
         return name
             .split(" ")
             .map((n) => n[0])
@@ -143,33 +147,24 @@ export function Sidebar() {
     }
 
     const SidebarContent = () => (
-        <div className="flex h-full flex-col bg-surface-light dark:bg-[#0F172A] border-r border-border">
+        <div className="flex h-full flex-col bg-[#050505] border-r border-white/5">
             {/* Header */}
-            <div className={cn("flex h-16 items-center border-b border-border px-4", isSidebarCollapsed ? "justify-center" : "justify-between")}>
+            <div className={cn("flex h-20 items-center px-6", isSidebarCollapsed ? "justify-center" : "justify-between")}>
                 {!isSidebarCollapsed && (
                     <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black">
                             <Layers className="h-5 w-5" />
                         </div>
-                        <span className="bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-400 bg-clip-text text-transparent">
+                        <span className="text-white">
                             SWIX
                         </span>
                     </div>
                 )}
                 {isSidebarCollapsed && (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black">
                         <Layers className="h-5 w-5" />
                     </div>
                 )}
-
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("hidden lg:flex h-8 w-8", isSidebarCollapsed && "hidden")}
-                    onClick={toggleSidebar}
-                >
-                    <ChevronLeft className="h-4 w-4" />
-                </Button>
             </div>
 
             {/* Navigation */}
@@ -199,51 +194,30 @@ export function Sidebar() {
             </ScrollArea>
 
             {/* Footer */}
-            <div className="border-t border-border p-4">
-                {!isSidebarCollapsed ? (
-                    <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-4 text-white shadow-lg relative overflow-hidden group">
-                        <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-20 transition-opacity"></div>
+            <div className="p-4 space-y-4">
+                {!isSidebarCollapsed && (
+                    <div className="rounded-2xl bg-white/5 p-4 border border-white/5">
                         <div className="flex items-center gap-2 mb-2">
-                            <Sparkles className="h-4 w-4 text-yellow-300" />
-                            <span className="text-xs font-bold uppercase tracking-wider opacity-90">Pro Plan</span>
+                            <Sparkles className="h-4 w-4 text-yellow-400" />
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pro Status</span>
                         </div>
-                        <p className="text-xs opacity-90 mb-3">
-                            AI Models are running at 100% efficiency.
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Your AI agents are optimized and ready.
                         </p>
-                        <Button size="sm" variant="secondary" className="w-full bg-white/20 hover:bg-white/30 border-none text-white h-7 text-xs">
-                            View Usage
-                        </Button>
-                    </div>
-                ) : (
-                    <div className="flex justify-center">
-                        <TooltipProvider>
-                            <Tooltip delayDuration={0}>
-                                <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-lg text-muted-foreground hover:bg-muted">
-                                        <Sparkles className="h-5 w-5 text-purple-500" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="right">AI Status: Online</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
                     </div>
                 )}
 
-                <div className={cn("mt-4 flex items-center", isSidebarCollapsed ? "justify-center" : "justify-between")}>
+                <div className={cn("flex items-center gap-3 px-2", isSidebarCollapsed ? "justify-center" : "")}>
+                    <Avatar className="h-8 w-8 border border-white/10">
+                        <AvatarImage src="" />
+                        <AvatarFallback className="bg-white/10 text-white text-xs">{getInitials(user?.name)}</AvatarFallback>
+                    </Avatar>
                     {!isSidebarCollapsed && (
-                        <div className="flex items-center gap-3">
-                            <div className="h-8 w-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300">
-                                {user ? getInitials(user.name) : "U"}
-                            </div>
-                            <div className="flex flex-col">
-                                <span className="text-sm font-medium truncate max-w-[120px]">{user?.name || "User"}</span>
-                                <span className="text-xs text-muted-foreground capitalize">{user?.role || "Member"}</span>
-                            </div>
+                        <div className="flex flex-col min-w-0">
+                            <span className="text-sm font-medium text-white truncate">{user?.name || "User"}</span>
+                            <span className="text-[10px] text-slate-500 capitalize">{user?.role || "Member"}</span>
                         </div>
                     )}
-                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" onClick={handleLogout}>
-                        <LogOut className="h-4 w-4" />
-                    </Button>
                 </div>
             </div>
         </div>

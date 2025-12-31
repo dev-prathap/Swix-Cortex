@@ -9,8 +9,9 @@ export class RawStorageService {
     name: string;
     originalFileName: string;
     fileBuffer: Buffer;
+    dataSourceId?: string;
   }) {
-    const { userId, name, originalFileName, fileBuffer } = params;
+    const { userId, name, originalFileName, fileBuffer, dataSourceId } = params;
 
     // 1. Create dataset record in DB
     const dataset = await prisma.dataset.create({
@@ -20,7 +21,8 @@ export class RawStorageService {
         originalFileName,
         rawFileLocation: "",
         fileSize: BigInt(fileBuffer.byteLength),
-      },
+        dataSourceId: dataSourceId || null,
+      } as any,
     });
 
     // 2. Upload raw file to object storage (immutable)

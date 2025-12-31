@@ -1,25 +1,8 @@
-import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { jwtVerify } from 'jose'
-import { cookies } from 'next/headers'
+import { getUserId } from '@/lib/auth'
+import { safeJsonResponse } from '@/lib/utils/serialization'
 import Papa from 'papaparse'
 import { Client } from 'pg'
-
-const JWT_SECRET = new TextEncoder().encode(
-    process.env.JWT_SECRET || 'default-secret-key-change-this-in-prod'
-)
-
-async function getUserId() {
-    const cookieStore = await cookies()
-    const token = cookieStore.get('token')?.value
-    if (!token) return null
-    try {
-        const { payload } = await jwtVerify(token, JWT_SECRET)
-        return payload.userId as string
-    } catch {
-        return null
-    }
-}
 
 // Helper to sanitize column names
 function sanitizeColumnName(name: string): string {
@@ -33,17 +16,17 @@ function cleanCurrencyValue(value: string): string {
 
 function normalizeDate(value: string): string {
     if (!value || typeof value !== 'string') return value
-    
+
     const strValue = value.trim()
-    
+
     // If already in YYYY-MM-DD format, return as is
     if (/^\d{4}-\d{2}-\d{2}$/.test(strValue)) {
         return strValue
     }
-    
+
     try {
         let date: Date | null = null
-        
+
         // Handle "Mar 11, 2025" format
         if (/^[A-Za-z]{3}\s\d{1,2},\s\d{4}$/.test(strValue)) {
             date = new Date(strValue)
@@ -68,7 +51,7 @@ function normalizeDate(value: string): string {
         else {
             date = new Date(strValue)
         }
-        
+
         if (date && !isNaN(date.getTime())) {
             // Format as YYYY-MM-DD
             const year = date.getFullYear()
@@ -79,7 +62,7 @@ function normalizeDate(value: string): string {
     } catch (error) {
         console.warn('Date parsing failed for value:', strValue, error)
     }
-    
+
     // If all parsing fails, return original value
     return strValue
 }
@@ -91,43 +74,43 @@ function cleanTextValue(value: string): string {
 // Enhanced type inference with data cleaning
 function inferTypeAndClean(value: any): { type: string, cleanedValue: any, issues: string[] } {
     const issues: string[] = []
-    let cleanedValue = value
-    
+    const cleanedValue = value
+
     if (value === null || value === undefined || value === '') {
         return { type: 'TEXT', cleanedValue: null, issues: [] }
     }
-    
+
     const strValue = String(value).trim()
-    
+
     // Check for currency format
     if (/^\$?[\d,]+\.?\d*$/.test(strValue)) {
         const cleaned = cleanCurrencyValue(strValue)
         if (!isNaN(Number(cleaned))) {
             issues.push('Currency symbols removed')
-            return { 
-                type: Number.isInteger(Number(cleaned)) ? 'INTEGER' : 'DECIMAL', 
+            return {
+                type: Number.isInteger(Number(cleaned)) ? 'INTEGER' : 'DECIMAL',
                 cleanedValue: Number(cleaned),
-                issues 
+                issues
             }
         }
     }
-    
+
     // Check for numeric values
     if (!isNaN(Number(strValue))) {
-        return { 
+        return {
             type: Number.isInteger(Number(strValue)) ? 'INTEGER' : 'DECIMAL',
             cleanedValue: Number(strValue),
             issues
         }
     }
-    
+
     // Check for date formats
     const datePatterns = [
         /^\d{1,2}\/\d{1,2}\/\d{4}$/, // MM/DD/YYYY
         /^[A-Za-z]{3}\s\d{1,2},\s\d{4}$/, // Mar 11, 2025
         /^\d{4}-\d{2}-\d{2}$/ // YYYY-MM-DD
     ]
-    
+
     if (datePatterns.some(pattern => pattern.test(strValue))) {
         const normalized = normalizeDate(strValue)
         if (normalized !== strValue) {
@@ -135,18 +118,18 @@ function inferTypeAndClean(value: any): { type: string, cleanedValue: any, issue
         }
         return { type: 'DATE', cleanedValue: normalized, issues }
     }
-    
+
     // Default to TEXT with cleaning
-    return { 
-        type: 'TEXT', 
-        cleanedValue: cleanTextValue(strValue), 
-        issues 
+    return {
+        type: 'TEXT',
+        cleanedValue: cleanTextValue(strValue),
+        issues
     }
 }
 
 export async function POST(req: Request) {
     const userId = await getUserId()
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!userId) return safeJsonResponse({ error: 'Unauthorized' }, { status: 401 })
 
     try {
         const formData = await req.formData()
@@ -154,13 +137,13 @@ export async function POST(req: Request) {
         const name = formData.get('name') as string
 
         if (!file || !name) {
-            return NextResponse.json({ error: 'File and name are required' }, { status: 400 })
+            return safeJsonResponse({ error: 'File and name are required' }, { status: 400 })
         }
 
         const text = await file.text()
         // Enhanced CSV parsing with better error handling
-        const parsed = Papa.parse(text, { 
-            header: true, 
+        const parsed = Papa.parse(text, {
+            header: true,
             skipEmptyLines: true,
             transform: (value, field) => {
                 // Basic cleaning during parse
@@ -175,9 +158,9 @@ export async function POST(req: Request) {
                 message: err.message,
                 row: err.row
             }))
-            
-            return NextResponse.json({ 
-                error: 'CSV parsing failed', 
+
+            return safeJsonResponse({
+                error: 'CSV parsing failed',
                 message: 'Your CSV file has formatting issues that prevent processing.',
                 details: errorDetails,
                 suggestions: [
@@ -190,7 +173,7 @@ export async function POST(req: Request) {
 
         const rows = parsed.data as any[]
         if (rows.length === 0) {
-            return NextResponse.json({ error: 'CSV is empty' }, { status: 400 })
+            return safeJsonResponse({ error: 'CSV is empty' }, { status: 400 })
         }
 
         // 1. Enhanced Schema Detection with Data Cleaning
@@ -202,41 +185,41 @@ export async function POST(req: Request) {
             issues: [] as string[],
             cleaningApplied: [] as string[]
         }
-        
+
         // Step 1: Analyze sample data for type inference
         const columnAnalysis = sanitizedHeaders.map((header, index) => {
             const originalHeader = headers[index]
             const columnIssues: string[] = []
             const sampleValues = []
             let finalType = 'TEXT'
-            
+
             // Analyze sample of values for type inference only
             for (let i = 0; i < Math.min(rows.length, 20); i++) {
                 const val = rows[i][originalHeader]
                 if (val !== null && val !== undefined && val !== '') {
                     const analysis = inferTypeAndClean(val)
                     sampleValues.push(analysis)
-                    
+
                     // Track issues
                     columnIssues.push(...analysis.issues)
-                    
+
                     // Determine final type (most restrictive wins)
                     if (analysis.type === 'TEXT') finalType = 'TEXT'
                     else if (analysis.type === 'DECIMAL' && finalType !== 'TEXT') finalType = 'DECIMAL'
                     else if (analysis.type === 'DATE' && finalType !== 'TEXT' && finalType !== 'DECIMAL') finalType = 'DATE'
                 }
             }
-            
+
             // Convert DATE to TIMESTAMP for PostgreSQL
             if (finalType === 'DATE') finalType = 'TIMESTAMP'
-            
+
             if (columnIssues.length > 0) {
                 dataQualityReport.cleaningApplied.push(`${originalHeader}: ${[...new Set(columnIssues)].join(', ')}`)
             }
-            
+
             return { header: originalHeader, sanitized: header, type: finalType, issues: columnIssues }
         })
-        
+
         // Step 2: Clean ALL rows based on inferred types
         console.log('Cleaning all rows with inferred types...')
         for (let i = 0; i < rows.length; i++) {
@@ -244,10 +227,10 @@ export async function POST(req: Request) {
                 const originalHeader = headers[j]
                 const columnType = columnAnalysis[j].type
                 const val = rows[i][originalHeader]
-                
+
                 if (val !== null && val !== undefined && val !== '') {
                     const analysis = inferTypeAndClean(val)
-                    
+
                     // Apply cleaning based on expected type
                     if (columnType === 'DECIMAL' || columnType === 'INTEGER') {
                         // Force numeric cleaning for numeric columns
@@ -268,7 +251,7 @@ export async function POST(req: Request) {
             }
         }
         console.log('Data cleaning completed for all rows')
-        
+
         const columnTypes = columnAnalysis.map(col => col.type)
 
         // 2. Create Table
@@ -297,18 +280,18 @@ export async function POST(req: Request) {
                 const rowValues = headers.map((h, colIndex) => {
                     const val = row[h]
                     const columnType = columnAnalysis[colIndex].type
-                    
+
                     // Handle empty values
                     if (val === '' || val === null || val === undefined) {
                         return null
                     }
-                    
+
                     // Ensure proper type conversion for database
                     if (columnType === 'DECIMAL' || columnType === 'INTEGER') {
                         const numVal = Number(val)
                         return isNaN(numVal) ? null : numVal
                     }
-                    
+
                     return val
                 })
 
@@ -339,8 +322,8 @@ export async function POST(req: Request) {
             })
 
             await client.end()
-            return NextResponse.json({ 
-                success: true, 
+            return safeJsonResponse({
+                success: true,
                 dataSource,
                 dataQualityReport,
                 message: `Successfully processed ${rows.length} rows with ${headers.length} columns`,
@@ -355,11 +338,11 @@ export async function POST(req: Request) {
         } catch (dbError: any) {
             await client.end()
             console.error('DB Error:', dbError)
-            
+
             // Provide specific error messages based on error type
             let userMessage = 'Database error occurred during data processing'
             let suggestions: string[] = []
-            
+
             if (dbError.message.includes('invalid input syntax')) {
                 userMessage = 'Data type mismatch detected'
                 suggestions = [
@@ -374,8 +357,8 @@ export async function POST(req: Request) {
                 userMessage = 'Column mapping error'
                 suggestions = ['Check your CSV headers for special characters or duplicates']
             }
-            
-            return NextResponse.json({ 
+
+            return safeJsonResponse({
                 error: userMessage,
                 message: 'We encountered an issue processing your data.',
                 technicalDetails: dbError.message,
@@ -386,6 +369,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('Upload error:', error)
-        return NextResponse.json({ error: 'Failed to process upload' }, { status: 500 })
+        return safeJsonResponse({ error: 'Failed to process upload' }, { status: 500 })
     }
 }

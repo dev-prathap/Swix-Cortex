@@ -6,6 +6,24 @@
     "app/api/**/*.ts": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/consolidate-events",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/run-all-agents",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/profile-customers",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/daily-briefing",
+      "schedule": "0 8 * * *"
+    }
+  ]
 }
 

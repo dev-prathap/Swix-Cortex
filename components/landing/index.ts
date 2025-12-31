@@ -1,0 +1,7 @@
+export { Navbar } from './Navbar'
+export { HeroSection } from './HeroSection'
+export { StatsSection } from './StatsSection'
+export { VideoSection } from './VideoSection'
+export { IntegrationSection } from './IntegrationSection'
+export { ComparisonSection } from './ComparisonSection'
+export { TrustedBySection } from './TrustedBySection'

@@ -89,7 +89,7 @@ function cleanTextValue(value: string): string {
 // Enhanced type inference with data cleaning
 function inferTypeAndClean(value: any): { type: string, cleanedValue: any, issues: string[] } {
     const issues: string[] = []
-    let cleanedValue = value
+    const cleanedValue = value
     
     if (value === null || value === undefined || value === '') {
         return { type: 'TEXT', cleanedValue: null, issues: [] }

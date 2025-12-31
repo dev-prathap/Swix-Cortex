@@ -1,153 +1,310 @@
 import prisma from '@/lib/prisma'
 import OpenAI from 'openai'
-import { SemanticAgent } from '@/lib/agents/semantic-agent'
-import { AnalysisAgent } from '@/lib/agents/analysis-agent'
+import { OrchestratorAgent } from '@/lib/agents/orchestrator-agent'
+import { ContextAgent } from '@/lib/agents/context-agent'
+import { AnalystAgent } from '@/lib/agents/analyst-agent'
+import { ExecutiveAgent } from '@/lib/agents/executive-agent'
+import { ForecastingAgent } from '@/lib/agents/forecasting-agent'
+import { AnomalyAgent } from '@/lib/agents/anomaly-agent'
 import { VisualizationAgent } from '@/lib/agents/visualization-agent'
-import { DuckDBEngine, getLocalFilePath } from '@/lib/data/duckdb-engine'
+import { HypothesisAgent } from '@/lib/agents/hypothesis-agent'
 import { normalizeChartData, validateChartData } from '@/lib/utils/normalizeChartData'
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || 'dummy-key-for-build'
-})
-
-const NL_QUERY_SYSTEM_PROMPT = `You are a data analysis assistant that interprets natural language queries.
-
-Given a user's question about their dataset, determine:
-1. The intent (summary, trend, comparison, top N, distribution, etc.)
-2. Which metrics/dimensions are relevant
-3. What aggregation is needed
-4. Any filters or time ranges
-
-Return a structured JSON interpretation that can be used to generate analysis and visualizations.
-
-Example output:
-{
-  "intent": "trend_analysis",
-  "metrics": ["revenue"],
-  "dimensions": ["month"],
-  "aggregation": "sum",
-  "filters": [],
-  "sort": {"column": "month", "direction": "asc"},
-  "limit": null
-}`
+import { queryCache } from '@/lib/cache/query-cache'
 
 export class NLQueryEngine {
-    private semanticAgent = new SemanticAgent()
-    private analysisAgent = new AnalysisAgent()
-    private vizAgent = new VisualizationAgent()
+    private orchestrator: OrchestratorAgent;
+    private contextAgent: ContextAgent;
+    private analystAgent: AnalystAgent;
+    private executiveAgent: ExecutiveAgent;
+    private forecastingAgent: ForecastingAgent;
+    private anomalyAgent: AnomalyAgent;
+    private vizAgent: VisualizationAgent;
+    private hypothesisAgent: HypothesisAgent;
 
-    async executeQuery(datasetId: string, userId: string, naturalLanguageQuery: string): Promise<any> {
-        // Get dataset and profile
-        const dataset = await prisma.dataset.findUnique({
-            where: { id: datasetId },
+    constructor() {
+        this.orchestrator = new OrchestratorAgent();
+        this.contextAgent = new ContextAgent();
+        this.analystAgent = new AnalystAgent();
+        this.executiveAgent = new ExecutiveAgent();
+        this.forecastingAgent = new ForecastingAgent();
+        this.anomalyAgent = new AnomalyAgent();
+        this.vizAgent = new VisualizationAgent();
+        this.hypothesisAgent = new HypothesisAgent();
+    }
+
+    async *streamQuery(datasetId: string, userId: string, naturalLanguageQuery: string): AsyncGenerator<any> {
+        // 1. Get dataset and profile
+        const dataset = await (prisma as any).dataset.findUnique({
+            where: { id: datasetId, userId },
             include: {
                 profile: true,
-                semanticMappings: true
+                semanticMappings: true,
+                metrics: true
             }
         })
 
-        if (!dataset || !dataset.profile) {
-            throw new Error('Dataset not profiled')
+        if (!dataset) {
+            throw new Error(`Dataset with ID "${datasetId}" not found.`);
         }
 
-        const profile = dataset.profile
+        yield { type: 'status', message: 'Analyzing dataset structure...' };
 
-        // Interpret query using GPT-4o
-        const interpretationPrompt = `Dataset Context:
-Domain: ${profile.domain}
-Entity: ${profile.mainEntity}
-Metrics: ${JSON.stringify(profile.metrics)}
-Dimensions: ${JSON.stringify(profile.dimensions)}
-Time Column: ${profile.timeColumn || 'none'}
+        // Auto-profile if not profiled
+        if (!dataset.profile) {
+            const { ProfilingAgent } = await import('@/lib/agents/profiling-agent');
+            const profilingAgent = new ProfilingAgent();
+            dataset.profile = await profilingAgent.profileDataset(datasetId);
+        }
 
-Semantic Concepts Available:
-${dataset.semanticMappings.map((m: any) => `- ${m.concept}: ${JSON.stringify(m.mappedColumns)}`).join('\n')}
+        const metricMap = dataset.metrics.reduce((acc: any, m: any) => {
+            acc[m.name] = m.formula
+            return acc
+        }, {})
 
-User Query: "${naturalLanguageQuery}"
+        yield { type: 'status', message: 'Planning analysis steps...' };
 
-Interpret this query and return structured analysis plan.`
-
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            response_format: { type: 'json_object' },
-            messages: [
-                { role: 'system', content: NL_QUERY_SYSTEM_PROMPT },
-                { role: 'user', content: interpretationPrompt }
-            ],
-            temperature: 0.2
+        // 2. Orchestration Plan
+        const tasks = await this.orchestrator.plan(naturalLanguageQuery, {
+            domain: dataset.profile.domain,
+            metrics: dataset.profile.metrics,
+            dimensions: dataset.profile.dimensions
         })
 
-        const interpretation = JSON.parse(response.choices[0].message.content || '{}')
+        yield { type: 'tasks', tasks };
 
-        // Store query
-        const query = await prisma.query.create({
+        // 3. Shared Memory / State
+        const state: any = {
+            query: naturalLanguageQuery,
+            dataset,
+            metricMap,
+            context: "",
+            data: [],
+            interpretation: null,
+            visualization: null,
+            executiveInsight: "",
+            forecast: "",
+            anomalies: "",
+            hypotheses: null
+        }
+
+        // Detect if this is a "why" question
+        const isWhyQuery = naturalLanguageQuery.toLowerCase().includes('why') ||
+                          naturalLanguageQuery.toLowerCase().includes('cause') ||
+                          naturalLanguageQuery.toLowerCase().includes('reason');
+
+        // 4. Execute Tasks
+        for (const task of tasks.sort((a, b) => a.priority - b.priority)) {
+            yield { type: 'agent_start', agent: task.agent, reasoning: task.reasoning };
+
+            try {
+                if (task.agent === "context") {
+                    state.context = await this.contextAgent.getContext(naturalLanguageQuery, datasetId)
+                    yield { type: 'context', content: state.context };
+                }
+                else if (task.agent === "analyst") {
+                    const result = await this.analystAgent.analyze(naturalLanguageQuery, dataset, metricMap)
+                    state.data = result.data
+                    state.interpretation = result.interpretation
+                    yield { type: 'data', data: state.data, interpretation: state.interpretation };
+                }
+                else if (task.agent === "visualization") {
+                    if (state.data.length > 0) {
+                        state.visualization = await this.vizAgent.generateVisualizationFromQuery(
+                            naturalLanguageQuery,
+                            datasetId,
+                            state.interpretation
+                        )
+                        yield { type: 'visualization', visualization: state.visualization };
+                    }
+                }
+                else if (task.agent === "executive") {
+                    // If "why" question and we have hypotheses, use evidence-backed summary
+                    if (isWhyQuery && state.hypotheses) {
+                        state.executiveInsight = this.generateEvidenceBasedSummary(
+                            naturalLanguageQuery,
+                            state.hypotheses
+                        );
+                    } else {
+                        state.executiveInsight = await this.executiveAgent.synthesize(
+                            naturalLanguageQuery,
+                            state.data,
+                            state.context,
+                            dataset.metrics
+                        );
+                    }
+                    
+                    // Ensure we send the string content, not an object
+                    const insightContent = typeof state.executiveInsight === 'string' 
+                        ? state.executiveInsight 
+                        : state.executiveInsight?.summary || "Analysis complete.";
+                    
+                    yield { type: 'insight', content: insightContent };
+                }
+                else if (task.agent === "forecasting" && state.data.length > 0) {
+                    state.forecast = await this.forecastingAgent.forecast(
+                        naturalLanguageQuery,
+                        state.data,
+                        state.interpretation
+                    )
+                    yield { type: 'forecast', content: state.forecast };
+                }
+                else if (task.agent === "anomaly" && state.data.length > 0) {
+                    state.anomalies = await this.anomalyAgent.detect(
+                        naturalLanguageQuery,
+                        state.data,
+                        state.interpretation
+                    )
+                    yield { type: 'anomalies', content: state.anomalies };
+                    
+                    // CRITICAL: After anomaly detection, run hypothesis testing for "why" questions
+                    if (isWhyQuery && state.data.length > 0) {
+                        yield { type: 'status', message: 'Investigating root causes...' };
+                        
+                        state.hypotheses = await this.hypothesisAgent.investigate(
+                            naturalLanguageQuery,
+                            dataset,
+                            state.data,
+                            state.interpretation
+                        );
+                        
+                        yield { type: 'hypotheses', content: state.hypotheses };
+                    }
+                }
+            } catch (error: any) {
+                console.error(`[Orchestrator] Error in ${task.agent}:`, error)
+                yield { type: 'agent_error', agent: task.agent, error: error.message };
+            }
+        }
+
+        // Final Fallbacks
+        if (state.data.length === 0 && !state.interpretation) {
+            const result = await this.analystAgent.analyze(naturalLanguageQuery, dataset, metricMap)
+            state.data = result.data
+            state.interpretation = result.interpretation
+            yield { type: 'data', data: state.data, interpretation: state.interpretation };
+        }
+
+        if (state.data.length > 0 && !state.visualization) {
+            state.visualization = await this.vizAgent.generateVisualizationFromQuery(
+                naturalLanguageQuery,
+                datasetId,
+                state.interpretation
+            )
+            yield { type: 'visualization', visualization: state.visualization };
+        }
+
+        // Store query in history
+        await prisma.query.create({
             data: {
                 datasetId,
                 userId,
                 naturalLanguage: naturalLanguageQuery,
-                interpretation
+                interpretation: state.interpretation || {}
             }
         })
 
-        // Generate visualization config (pass interpretation for smart chart selection)
-        const vizConfig = await this.vizAgent.generateVisualizationFromQuery(
-            naturalLanguageQuery,
-            datasetId,
-            interpretation
-        )
-
-        // Execute real query using DuckDB
-        let realData: any[] = []
-        try {
-            const filePath = getLocalFilePath(dataset.rawFileLocation)
-            const duckdb = new DuckDBEngine()
-            const rawData = await duckdb.executeInterpretation(filePath, interpretation)
-            duckdb.close()
-            
-            // BigInt-safe logging
-            console.log(`[NLQuery] Raw DuckDB data (${rawData.length} rows):`, 
-                JSON.stringify(rawData.slice(0, 2), (_, value) => 
-                    typeof value === 'bigint' ? value.toString() : value
-                , 2))
-            
-            // 🔥 KEY FIX: Normalize data for Recharts
-            realData = normalizeChartData(rawData, interpretation)
-            
-            // BigInt-safe logging
-            console.log(`[NLQuery] Normalized chart data:`, 
-                JSON.stringify(realData.slice(0, 2), (_, value) => 
-                    typeof value === 'bigint' ? value.toString() : value
-                , 2))
-            
-            // Validate the normalized data
-            const isValid = validateChartData(realData)
-            if (!isValid) {
-                console.warn('[NLQuery] Chart data validation failed, using mock data')
-                realData = this.generateMockData(interpretation)
+        // Ensure explanation is a string
+        const explanation = typeof state.executiveInsight === 'string' 
+            ? state.executiveInsight 
+            : state.executiveInsight?.summary || "Analysis completed successfully.";
+        
+        yield {
+            type: 'complete', final: {
+                interpretation: state.interpretation,
+                visualization: state.visualization,
+                data: state.data,
+                explanation: explanation,
+                forecast: state.forecast,
+                anomalies: state.anomalies,
+                hypotheses: state.hypotheses // NEW: Include hypothesis investigation results
             }
-        } catch (error) {
-            console.error('[NLQuery] DuckDB query failed, using mock data:', error)
-            // Fallback to mock data if DuckDB fails
-            realData = this.generateMockData(interpretation)
+        };
+    }
+    
+    /**
+     * Generate evidence-backed summary from hypothesis investigation
+     */
+    private generateEvidenceBasedSummary(
+        query: string,
+        investigation: any
+    ): any {
+        if (!investigation || investigation.overall_confidence === 0) {
+            return {
+                summary: "Unable to determine root cause with available data.",
+                confidence: "low",
+                data_quality: "insufficient_evidence"
+            };
         }
-
+        
+        let summary = `### Root Cause Analysis\n\n`;
+        
+        // Primary cause
+        if (investigation.primary_cause) {
+            const p = investigation.primary_cause;
+            summary += `**Primary Cause (Confidence: ${p.confidence}%)**\n`;
+            summary += `${p.hypothesis}\n\n`;
+            summary += `Evidence: ${p.conclusion}\n\n`;
+        }
+        
+        // Secondary causes
+        if (investigation.secondary_causes && investigation.secondary_causes.length > 0) {
+            summary += `**Contributing Factors:**\n`;
+            investigation.secondary_causes.forEach((s: any, i: number) => {
+                summary += `${i + 1}. ${s.hypothesis} (Confidence: ${s.confidence}%)\n`;
+                summary += `   Evidence: ${s.conclusion}\n\n`;
+            });
+        }
+        
+        // Unproven hypotheses
+        if (investigation.unproven_hypotheses && investigation.unproven_hypotheses.length > 0) {
+            summary += `**Additional Possibilities (Unproven):**\n`;
+            investigation.unproven_hypotheses.slice(0, 2).forEach((u: any, i: number) => {
+                summary += `- ${u.hypothesis}\n`;
+                summary += `  ${u.conclusion}\n\n`;
+            });
+        }
+        
+        const confidenceLevel = investigation.overall_confidence >= 70 ? "high" :
+                               investigation.overall_confidence >= 50 ? "medium" : "low";
+        
         return {
-            query,
-            interpretation, // ✅ Contains metrics, dimensions, intent for multi-series detection
-            visualization: {
-                type: vizConfig.type,
-                title: vizConfig.title,
-                config: {
-                    xAxis: vizConfig.xAxis.column,
-                    yAxis: vizConfig.yAxis.columns[0] // Primary metric
-                },
-                explanation: vizConfig.explanation
-            },
-            data: realData,
-            explanation: this.generateExplanation(interpretation, naturalLanguageQuery)
-        }
+            summary: summary,
+            confidence: confidenceLevel,
+            data_quality: `${investigation.overall_confidence}% overall confidence`
+        };
     }
 
+    async executeQuery(datasetId: string, userId: string, naturalLanguageQuery: string): Promise<any> {
+        // Check cache first
+        const cacheKey = queryCache.generateKey(datasetId, naturalLanguageQuery);
+        const cached = queryCache.get(cacheKey);
+        
+        if (cached) {
+            console.log(`[QueryCache] HIT for query: ${naturalLanguageQuery.slice(0, 50)}...`);
+            return {
+                ...cached,
+                _cached: true,
+                _cachedAt: new Date()
+            };
+        }
+        
+        console.log(`[QueryCache] MISS for query: ${naturalLanguageQuery.slice(0, 50)}...`);
+        
+        // Execute query normally
+        let finalResult: any = {};
+        for await (const update of this.streamQuery(datasetId, userId, naturalLanguageQuery)) {
+            if (update.type === 'complete') {
+                finalResult = update.final;
+            }
+        }
+        
+        // Cache successful results (1 hour TTL)
+        if (finalResult && finalResult.data && finalResult.data.length > 0) {
+            queryCache.set(cacheKey, finalResult, 3600);
+        }
+        
+        return finalResult;
+    }
     private generateMockData(interpretation: any): any[] {
         const intent = interpretation.intent || 'top_N'
         const limit = interpretation.limit || 5

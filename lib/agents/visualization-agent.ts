@@ -122,7 +122,7 @@ export class VisualizationAgent {
      * Uses intent to automatically pick the best chart type
      */
     async generateVisualizationFromQuery(
-        query: string, 
+        query: string,
         datasetId: string,
         interpretation?: any
     ): Promise<VisualizationConfig> {
@@ -259,9 +259,9 @@ export class VisualizationAgent {
             }
         }
 
-        // DEFAULT: Bar Chart (safest choice)
+        // DEFAULT: Table (safest choice if no visual intent)
         return {
-            type: 'bar',
+            type: 'table' as any,
             title: 'Analysis Result',
             xAxis: {
                 column: dimensions[0] || metrics[0] || 'category',
@@ -273,7 +273,7 @@ export class VisualizationAgent {
                 label: metrics[0] || 'Value',
                 aggregation: 'sum'
             },
-            explanation: 'Default bar chart visualization'
+            explanation: 'Table view selected for data summary'
         }
     }
 }

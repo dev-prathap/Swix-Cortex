@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma'
 import { jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 import { NLQueryEngine } from '@/lib/query/nl-query-engine'
+import { rateLimiter } from '@/lib/middleware/rate-limiter'
 
 const JWT_SECRET = new TextEncoder().encode(
     process.env.JWT_SECRET || 'default-secret-key-change-this-in-prod'
@@ -24,6 +25,23 @@ async function getUserId() {
 export async function POST(req: Request) {
     const userId = await getUserId()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    // Rate limit check
+    const rateLimit = rateLimiter.check(userId);
+    if (!rateLimit.allowed) {
+        return NextResponse.json({
+            error: 'Rate limit exceeded',
+            resetAt: new Date(rateLimit.resetAt).toISOString(),
+            message: 'You have exceeded the maximum of 50 queries per hour. Please try again later.'
+        }, {
+            status: 429,
+            headers: {
+                'X-RateLimit-Limit': '50',
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': rateLimit.resetAt.toString()
+            }
+        });
+    }
 
     try {
         const { datasetId, query } = await req.json()
@@ -56,6 +74,12 @@ export async function POST(req: Request) {
             success: true,
             result: safeResult,
             message: 'Query executed successfully'
+        }, {
+            headers: {
+                'X-RateLimit-Limit': '50',
+                'X-RateLimit-Remaining': rateLimit.remaining.toString(),
+                'X-RateLimit-Reset': rateLimit.resetAt.toString()
+            }
         })
     } catch (error) {
         console.error('NL query failed:', error)

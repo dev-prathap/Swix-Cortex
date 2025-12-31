@@ -1,9 +1,6 @@
+import { getAIClient, getModelName } from "@/lib/ai/ai-client";
+import { safeParseJson } from "@/lib/utils/ai-helpers";
 import prisma from '@/lib/prisma'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || 'dummy-key-for-build'
-})
 
 const SEMANTIC_SYSTEM_PROMPT = `You are an expert at mapping data columns to business concepts.
 
@@ -37,6 +34,14 @@ Example output:
 }`
 
 export class SemanticAgent {
+    private client: any;
+    private model: string;
+
+    constructor() {
+        this.client = getAIClient('reasoning');
+        this.model = getModelName('reasoning');
+    }
+
     async mapSemanticConcepts(datasetId: string): Promise<any> {
         // Get dataset profile
         const dataset = await prisma.dataset.findUnique({
@@ -62,8 +67,8 @@ Identify semantic business concepts and map them to these columns.
 Consider the domain context when making mappings.`
 
         // Call OpenAI
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+        const response = await this.client.chat.completions.create({
+            model: this.model,
             response_format: { type: 'json_object' },
             messages: [
                 { role: 'system', content: SEMANTIC_SYSTEM_PROMPT },
@@ -72,7 +77,7 @@ Consider the domain context when making mappings.`
             temperature: 0.3
         })
 
-        const result = JSON.parse(response.choices[0].message.content || '{}')
+        const result = safeParseJson(response.choices[0].message.content || '{}', {} as any);
         const mappings = result.mappings || {}
 
         // Store mappings in database

@@ -84,7 +84,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     try {
         const { id } = await params
-        
+
         // Get data source details before deletion
         const dataSource = await prisma.dataSource.findUnique({
             where: { id, userId }
@@ -94,20 +94,72 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             return NextResponse.json({ error: 'Data source not found' }, { status: 404 })
         }
 
-        // If it's an ingested CSV, also drop the database table
-        if (dataSource.type === 'POSTGRES') {
+        // Delete associated datasets (matching by name pattern for now since direct link is missing)
+        const associatedDatasets = await prisma.dataset.findMany({
+            where: {
+                userId,
+                name: { startsWith: dataSource.name }
+            }
+        })
+
+        for (const dataset of associatedDatasets) {
+            // Clean up files if they exist
+            try {
+                const storagePath = process.env.LOCAL_STORAGE_PATH || "./data/uploads"
+                const filePath = `${storagePath}/${dataset.rawFileLocation}`
+                const fs = require('fs')
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath)
+                }
+            } catch (e) {
+                console.warn('Failed to delete dataset file:', e)
+            }
+
+            // Delete related records first (cascade delete all foreign keys)
+            await prisma.query.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.analysis.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.semanticMapping.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.cleaningPlan.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.dataProfile.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.customerProfile.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.productInsight.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+            await prisma.dailyBriefing.deleteMany({
+                where: { datasetId: dataset.id }
+            })
+
+            // Now safe to delete dataset
+            await prisma.dataset.delete({
+                where: { id: dataset.id }
+            })
+        }
+
+        // If it's an ingested CSV or DB, drop the database table
+        if (dataSource.type === 'POSTGRES' || dataSource.type === 'MYSQL') {
             try {
                 const connectionDetails = JSON.parse(dataSource.connectionDetails)
                 if (connectionDetails.isIngested && connectionDetails.tableName) {
                     const client = new Client({ connectionString: process.env.DATABASE_URL })
                     await client.connect()
-                    
+
                     try {
                         await client.query(`DROP TABLE IF EXISTS "${connectionDetails.tableName}"`)
                         console.log(`Dropped table: ${connectionDetails.tableName}`)
                     } catch (dbError) {
                         console.warn('Failed to drop table:', dbError)
-                        // Continue with deletion even if table drop fails
                     } finally {
                         await client.end()
                     }
@@ -122,10 +174,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             where: { id }
         })
 
-        return NextResponse.json({ 
-            success: true, 
-            message: 'Data source deleted successfully',
-            deletedId: id 
+        return NextResponse.json({
+            success: true,
+            message: 'Data source and associated data deleted successfully',
+            deletedId: id
         })
     } catch (error) {
         console.error('Delete data source error:', error)

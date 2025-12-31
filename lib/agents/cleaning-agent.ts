@@ -1,9 +1,6 @@
-import OpenAI from "openai";
+import { getAIClient, getModelName } from "@/lib/ai/ai-client";
+import { safeParseJson } from "@/lib/utils/ai-helpers";
 import prisma from "@/lib/prisma";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "dummy-key-for-build",
-});
 
 export type CleaningActionType =
   | "normalize_date"
@@ -57,6 +54,14 @@ Return ONLY JSON.
 `;
 
 export class CleaningAgent {
+  private client: any;
+  private model: string;
+
+  constructor() {
+    this.client = getAIClient('fast');
+    this.model = getModelName('fast');
+  }
+
   async generatePlan(datasetId: string) {
     const dataset = await prisma.dataset.findUnique({
       where: { id: datasetId },
@@ -75,8 +80,8 @@ export class CleaningAgent {
       issues: dataset.profile.issues,
     };
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const completion = await this.client.chat.completions.create({
+      model: this.model,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: CLEANING_SYSTEM_PROMPT },
@@ -89,10 +94,8 @@ export class CleaningAgent {
       throw new Error("Empty cleaning response from AI");
     }
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(content);
-    } catch (e) {
+    const parsed = safeParseJson(content, {} as any);
+    if (!parsed || Object.keys(parsed).length === 0) {
       throw new Error("Failed to parse cleaning JSON from AI");
     }
 

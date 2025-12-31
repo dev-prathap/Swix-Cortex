@@ -101,8 +101,6 @@ export async function POST(req: Request) {
                     // Get sample data to understand actual content
                     const sampleRes = await client.query(`
                         SELECT * FROM "${tableName}" 
-                        WHERE "claim_amount" IS NOT NULL 
-                        AND "claim_amount" != '' 
                         LIMIT 3
                     `)
 
@@ -112,24 +110,24 @@ export async function POST(req: Request) {
                         const dbType = col.data_type
                         let actualType = dbType
                         let sampleValues: any[] = []
-                        
+
                         // Extract sample values for this column
                         if (sampleRes.rows.length > 0) {
                             sampleValues = sampleRes.rows.map(row => row[colName]).filter(val => val !== null && val !== '')
                         }
-                        
+
                         // Determine actual data type based on content
                         if (sampleValues.length > 0 && dbType === 'text') {
                             const firstVal = String(sampleValues[0]).trim()
-                            
+
                             // Check if it's actually numeric (currency, amounts)
                             if (/^\$?[\d,]+\.?\d*$/.test(firstVal) || !isNaN(Number(firstVal))) {
                                 actualType = 'NUMERIC (stored as text)'
                             }
                             // Check if it's actually a date
-                            else if (/^\d{4}-\d{2}-\d{2}$/.test(firstVal) || 
-                                     /^[A-Za-z]{3}\s\d{1,2},\s\d{4}$/.test(firstVal) ||
-                                     /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(firstVal)) {
+                            else if (/^\d{4}-\d{2}-\d{2}$/.test(firstVal) ||
+                                /^[A-Za-z]{3}\s\d{1,2},\s\d{4}$/.test(firstVal) ||
+                                /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(firstVal)) {
                                 actualType = 'DATE (stored as text)'
                             }
                             // Check if it's categorical (limited unique values)
@@ -137,7 +135,7 @@ export async function POST(req: Request) {
                                 actualType = 'CATEGORICAL'
                             }
                         }
-                        
+
                         return {
                             name: colName,
                             dbType: dbType,
@@ -154,7 +152,7 @@ export async function POST(req: Request) {
                         }
                         return desc
                     }).join('\n  ')
-                    
+
                     schemaContext = `Table: "${tableName}"
 Columns:
   ${columnDescriptions}`
@@ -182,27 +180,24 @@ Columns:
             } finally {
                 await client.end()
             }
-            
+
             // Enhanced schema context with intelligent data type hints
             const enhancedSchema = schemaContext + `
 
 DATA ANALYSIS CONTEXT:
-- This is healthcare claims rejection data
-- Key business metrics: claim amounts, collection rates, rejection patterns
-- Time dimensions: claim dates, service dates, processing dates
-- Categorical dimensions: payers, facilities, statuses, providers
+- This is a general business dataset
+- Identify key metrics and dimensions from the schema
+- Look for date, numeric, and categorical patterns
 
 SQL GENERATION RULES:
 - For NUMERIC columns stored as text: Use CAST("column_name" AS NUMERIC)
 - For DATE columns stored as text: Use CAST("column_name" AS DATE) 
-- For currency values: Filter WHERE CAST("column_name" AS NUMERIC) > 0
-- For dates: Filter WHERE "column_name" IS NOT NULL AND "column_name" != ''
 - Always use double quotes around table and column names
 - Use meaningful aliases for calculated fields
 - Include appropriate ORDER BY and LIMIT clauses`
-            
+
             // Generate comprehensive AI prompt with full schema understanding
-            const systemPrompt = `You are an expert PostgreSQL analyst specializing in healthcare claims data analysis.
+            const systemPrompt = `You are an expert PostgreSQL analyst.
 
 DATABASE SCHEMA:
 ${enhancedSchema}
@@ -223,22 +218,8 @@ TYPE CASTING RULES:
 - DATE columns stored as text: CAST("column_name" AS DATE)
 - Always filter out nulls and empty strings for calculations
 
-QUERY PATTERNS BY QUESTION TYPE:
+ALWAYS consider the business context of the dataset when generating queries.`
 
-Trend Analysis:
-- Time series: SELECT DATE_TRUNC('month', CAST("claim_date" AS DATE)) as month, COUNT(*) as claim_count FROM "${tableName}" WHERE "claim_date" IS NOT NULL GROUP BY 1 ORDER BY 1
-
-Top/Bottom Analysis:
-- Top payers: SELECT "payer_name", SUM(CAST("claim_amount" AS NUMERIC)) as total_amount FROM "${tableName}" WHERE "claim_amount" IS NOT NULL AND "payer_name" IS NOT NULL GROUP BY "payer_name" ORDER BY 2 DESC LIMIT 10
-
-Comparison Analysis:
-- Status distribution: SELECT "status", COUNT(*) as count, AVG(CAST("claim_amount" AS NUMERIC)) as avg_amount FROM "${tableName}" WHERE "status" IS NOT NULL GROUP BY "status" ORDER BY 2 DESC
-
-Detailed Analysis:
-- Complex filters: Use multiple WHERE conditions with proper type casting
-
-ALWAYS consider the business context of healthcare claims when generating queries.`
-            
             const completion = await openai.chat.completions.create({
                 messages: [
                     { role: "system", content: systemPrompt },
@@ -257,16 +238,16 @@ ALWAYS consider the business context of healthcare claims when generating querie
                     .replace(/^\s*--.*$/gm, '') // Remove SQL comments
                     .replace(/\n\s*\n/g, '\n') // Remove empty lines
                     .trim()
-                
+
                 // Validate that it starts with a SQL keyword
                 const sqlKeywords = ['SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE']
                 const firstWord = generatedSQL.split(/\s+/)[0]?.toUpperCase()
-                
+
                 if (!firstWord || !sqlKeywords.includes(firstWord)) {
                     console.error('Generated content is not valid SQL:', generatedSQL)
                     generatedSQL = undefined // Force fallback
                 }
-                
+
                 // Check for common AI text patterns that shouldn't be in SQL
                 if (generatedSQL) {
                     const sqlToTest: string = generatedSQL // Type assertion for clarity
@@ -278,7 +259,7 @@ ALWAYS consider the business context of healthcare claims when generating querie
                         /^I\s+/i, // Starts with "I "
                         /^You\s+/i // Starts with "You "
                     ]
-                    
+
                     if (invalidPatterns.some(pattern => pattern.test(sqlToTest))) {
                         console.error('Generated content contains explanatory text:', sqlToTest)
                         generatedSQL = undefined // Force fallback
@@ -289,11 +270,11 @@ ALWAYS consider the business context of healthcare claims when generating querie
             if (!generatedSQL || generatedSQL.startsWith("ERROR")) {
                 console.error('AI Generation Failed. Schema:', schemaContext)
                 console.error('Generated SQL:', generatedSQL)
-                
+
                 // Provide a fallback query for basic data exploration
-                const fallbackSQL = `SELECT * FROM "${tableName}" WHERE "claim_amount" IS NOT NULL LIMIT 10`
+                const fallbackSQL = `SELECT * FROM "${tableName}" LIMIT 10`
                 console.log('Using fallback query:', fallbackSQL)
-                
+
                 await prisma.queryHistory.create({
                     data: {
                         userId,
@@ -301,7 +282,7 @@ ALWAYS consider the business context of healthcare claims when generating querie
                         generatedSQL: fallbackSQL,
                     }
                 })
-                
+
                 return NextResponse.json({ sql: fallbackSQL })
             }
 
@@ -315,7 +296,7 @@ ALWAYS consider the business context of healthcare claims when generating querie
             })
 
             return NextResponse.json({ sql: generatedSQL })
-            
+
         } else {
             // Fallback for other types if implemented later
             return NextResponse.json({ error: 'Schema introspection not available for this source type' }, { status: 501 })
